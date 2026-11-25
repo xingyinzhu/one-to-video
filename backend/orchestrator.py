@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -28,6 +29,7 @@ from .settings import (
     detect_ffmpeg_binaries,
     get_default_desktop_output_dir,
     get_default_downloads_dir,
+    is_running_in_docker,
     resolve_project_media_path,
 )
 from .video_engine import (
@@ -142,6 +144,8 @@ class StudioOrchestrator:
             "ffmpeg_path": ffmpeg_bin or "",
             "ffprobe_path": ffprobe_bin or "",
             "install_hint": "brew install ffmpeg",
+            "is_docker": is_running_in_docker(),
+            "can_reveal_in_finder": (sys.platform == "darwin" and not is_running_in_docker()),
             "downloads_dir": str(dl_dir),
             "desktop_output_dir": str(out_dir),
             "has_gemini_key": bool((cfg.get("gemini_api_key") or "").strip()),

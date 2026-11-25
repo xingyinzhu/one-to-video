@@ -47,6 +47,11 @@ def ensure_base_dirs() -> None:
     get_projects_dir().mkdir(parents=True, exist_ok=True)
 
 
+def is_running_in_docker() -> bool:
+    """偵測目前是否執行於 Docker 容器環境中。"""
+    return Path("/.dockerenv").exists() or os.environ.get("STUDIO_IN_DOCKER") == "1"
+
+
 def resolve_project_media_path(
     stored_path: str, project_id: str, subdir: str
 ) -> Optional[Path]:

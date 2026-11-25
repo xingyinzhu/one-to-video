@@ -867,7 +867,25 @@ function renderStage5(proj) {
   $("btnExportTxt").href = `/api/projects/${pid}/voiceover-script?fmt=txt`;
 
   const displayPath = meta.desktop_path || meta.output_path || "尚未產出";
-  $("deliveryPathLabel").textContent = `儲存位置：${displayPath}`;
+  const canReveal =
+    state.systemStatus && state.systemStatus.can_reveal_in_finder !== undefined
+      ? Boolean(state.systemStatus.can_reveal_in_finder)
+      : true;
+  $("deliveryPathLabel").textContent = canReveal
+    ? `儲存位置：${displayPath}`
+    : `儲存位置（Docker 容器模式）：${displayPath}（請點「下載 MP4 成片」或直接至掛載資料夾取檔）`;
+
+  const revealBtn = $("btnRevealFinder");
+  const dlBtn = $("btnDownloadVideo");
+  if (canReveal) {
+    revealBtn.textContent = "📂 在 Finder 中打開成品";
+    revealBtn.className = "btn btn-cta";
+    dlBtn.className = "btn btn-secondary";
+  } else {
+    revealBtn.textContent = "📋 複製成片路徑";
+    revealBtn.className = "btn btn-secondary";
+    dlBtn.className = "btn btn-cta";
+  }
 
   $("specDuration").textContent = meta.duration ? `${Number(meta.duration).toFixed(1)} 秒` : "--";
   $("specResolution").textContent = meta.width ? `${meta.width} × ${meta.height}` : "--";
@@ -1388,7 +1406,7 @@ function initEvents() {
     renderAll();
   });
 
-  // 階段 ⑤：Finder 打開、重新合成、返回素材
+  // 階段 ⑤：Finder 打開（Docker 模式自動改為複製成片路徑）、重新合成、返回素材
   $("btnRevealFinder").addEventListener("click", async () => {
     if (!state.currentProject) return;
     try {
@@ -1396,7 +1414,15 @@ function initEvents() {
         `/api/projects/${encodeURIComponent(state.currentProject.id)}/reveal`,
         { method: "POST" }
       );
-      showToast(`已在 Finder 反白顯示：${res.path}`);
+      if (res.opened === false) {
+        const copyTarget = res.host_path || res.path || "";
+        await copyText(
+          copyTarget,
+          res.message || `已複製成片路徑：${copyTarget}`
+        );
+      } else {
+        showToast(res.message || `已在 Finder 反白顯示：${res.path}`);
+      }
     } catch (err) {
       showToast(err.message, "error");
     }

@@ -30,6 +30,8 @@ from .settings import (
     FRONTEND_DIR,
     SERVER_HOST,
     SERVER_PORT,
+    get_default_desktop_output_dir,
+    is_running_in_docker,
     resolve_project_media_path,
 )
 
@@ -639,26 +641,42 @@ async def api_reveal_in_finder(project_id: str) -> Dict[str, Any]:
     if not proj:
         raise HTTPException(status_code=404, detail="找不到此專案")
     meta = proj.get("output_meta") or {}
-    target_str = meta.get("desktop_path") or meta.get("output_path") or ""
-    target = Path(target_str) if target_str else None
-    if not target or not target.exists():
-        alt = Path(meta.get("output_path") or "")
-        if alt.exists():
-            target = alt
-        else:
-            raise HTTPException(status_code=404, detail="找不到可開啟的成片檔案")
+    desktop_raw = meta.get("desktop_path") or ""
+    output_raw = meta.get("output_path") or ""
 
-    if sys.platform != "darwin":
+    target: Optional[Path] = None
+    if desktop_raw:
+        desk_p = Path(desktop_raw)
+        if desk_p.is_file():
+            target = desk_p
+        else:
+            mapped_out = get_default_desktop_output_dir() / desk_p.name
+            if mapped_out.is_file():
+                target = mapped_out
+    if not target:
+        target = resolve_project_media_path(output_raw, project_id, "output")
+    if not target or not target.exists():
+        raise HTTPException(status_code=404, detail="找不到可開啟的成片檔案")
+
+    if sys.platform != "darwin" or is_running_in_docker():
+        host_hint = desktop_raw or str(target)
         return {
             "ok": True,
+            "opened": False,
+            "is_docker": is_running_in_docker(),
             "path": str(target),
-            "message": f"目前為 Linux / Docker 環境，請直接於掛載的輸出目錄查看成片：{target}",
+            "host_path": host_hint,
+            "message": f"Docker 容器內無法直接開啟 macOS Finder，已複製本機路徑：{host_hint}（或點「下載 MP4 成片」直接存檔）",
         }
 
     proc = subprocess.run(["open", "-R", str(target)], capture_output=True, text=True, check=False)
     return {
         "ok": proc.returncode == 0,
+        "opened": proc.returncode == 0,
+        "is_docker": False,
         "path": str(target),
+        "host_path": str(target),
+        "message": f"已在 Finder 反白顯示：{target}",
     }
 
 
