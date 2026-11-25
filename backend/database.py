@@ -187,7 +187,7 @@ class Database:
             "comfyui_url": "",
             "comfyui_use_turbo": "false",
             "comfyui_enable_realesrgan": "true",
-            "comfyui_relay_mode": "true",
+            "comfyui_relay_mode": "false",
         }
         with self.connect() as conn:
             rows = conn.execute("SELECT key, value FROM app_settings").fetchall()

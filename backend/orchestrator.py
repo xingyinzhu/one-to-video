@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -161,7 +162,7 @@ class StudioOrchestrator:
             "comfyui_url": cfg.get("comfyui_url", ""),
             "comfyui_use_turbo": cfg.get("comfyui_use_turbo", "false") == "true",
             "comfyui_enable_realesrgan": cfg.get("comfyui_enable_realesrgan", "true") == "true",
-            "comfyui_relay_mode": cfg.get("comfyui_relay_mode", "true") == "true",
+            "comfyui_relay_mode": cfg.get("comfyui_relay_mode", "false") == "true",
             "colab_auth": get_colab_auth_status(),
             "watcher_running": self.watcher.is_running,
             "watcher_project_id": self.watcher.active_project_id,
@@ -1009,6 +1010,40 @@ class StudioOrchestrator:
     # -------------------------
     # Colab G4 ComfyUI（MiniMax H3 首尾幀接力 + RealESRGAN 1080p）全自動生片引擎
     # -------------------------
+    @staticmethod
+    def _effective_prompt(prompt_en: str, proj: Dict[str, Any]) -> str:
+        """無聲模式下明確要求 MiniMax H3 不要生成旁白／人聲。"""
+        p = (prompt_en or "").strip()
+        if proj.get("audio_mode") == "mute" and "no narration" not in p.lower():
+            p = p.rstrip(".") + ", silent documentary footage, no narration, no speech, no talking."
+        return p
+
+    @staticmethod
+    def _maybe_strip_audio(proj: Dict[str, Any], clip_path: Path) -> None:
+        """無聲模式下，下載回本機的單鏡直接去除音軌（影像串流 copy，不重新編碼）。"""
+        if proj.get("audio_mode") != "mute":
+            return
+        try:
+            meta = probe_video(clip_path)
+            if not meta.get("has_audio"):
+                return
+            ffmpeg_bin, _ = detect_ffmpeg_binaries(allow_static_download=False)
+            if not ffmpeg_bin:
+                return
+            tmp_out = clip_path.with_name(clip_path.stem + "_silent.mp4")
+            proc = subprocess.run(
+                [ffmpeg_bin, "-y", "-i", str(clip_path), "-c:v", "copy", "-an", str(tmp_out)],
+                capture_output=True,
+                check=False,
+                timeout=120,
+            )
+            if proc.returncode == 0 and tmp_out.is_file() and tmp_out.stat().st_size > 1024:
+                tmp_out.replace(clip_path)
+            elif tmp_out.exists():
+                tmp_out.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     def test_comfyui_connection(self, url: str) -> Dict[str, Any]:
         """測試 Colab ComfyUI 連線並回傳 GPU / VRAM / 模型偵測資訊；連線成功則自動保存網址。"""
         clean_url = normalize_comfyui_url(url)
@@ -1097,7 +1132,7 @@ class StudioOrchestrator:
             eff_relay = (
                 bool(relay_mode)
                 if relay_mode is not None
-                else (cfg.get("comfyui_relay_mode", "true") == "true")
+                else (cfg.get("comfyui_relay_mode", "false") == "true")
             )
             eff_turbo = (
                 bool(use_turbo)
@@ -1284,7 +1319,7 @@ class StudioOrchestrator:
                 )
 
                 wf = client.build_minimax_h3_workflow(
-                    prompt_en=shot["prompt_en"],
+                    prompt_en=self._effective_prompt(shot["prompt_en"], proj),
                     duration_sec=dur_sec,
                     aspect_ratio=proj["aspect_ratio"],
                     first_frame_image=first_frame_remote,
@@ -1321,6 +1356,7 @@ class StudioOrchestrator:
                 )
 
                 # 驗證並擷取縮圖入庫
+                self._maybe_strip_audio(proj, dest_clip)
                 meta = probe_video(dest_clip)
                 dest_thumb = dirs["thumbs"] / f"shot_{shot_order:02d}.jpg"
                 extract_thumbnail(dest_clip, dest_thumb, duration_hint=meta["duration"])
@@ -1448,7 +1484,7 @@ class StudioOrchestrator:
             eff_relay = (
                 bool(relay_mode)
                 if relay_mode is not None
-                else (cfg.get("comfyui_relay_mode", "true") == "true")
+                else (cfg.get("comfyui_relay_mode", "false") == "true")
             )
             eff_turbo = (
                 bool(use_turbo)
@@ -1589,7 +1625,7 @@ class StudioOrchestrator:
             vram_gb = float(conn_info.get("vram_total_gb") or 24.0)
             models = conn_info.get("models") or {}
 
-            is_low_vram = (provisioned_gpu == "L4") or (vram_gb < 40.0)
+            is_low_vram = (provisioned_gpu == "L4") or (vram_gb < 32.0)
             can_esrgan = enable_realesrgan and bool(conn_info.get("has_realesrgan")) and (not is_low_vram)
             can_turbo = use_turbo and bool(conn_info.get("has_turbo_lora"))
 
@@ -1648,7 +1684,7 @@ class StudioOrchestrator:
                 )
 
                 wf = client.build_minimax_h3_workflow(
-                    prompt_en=shot["prompt_en"],
+                    prompt_en=self._effective_prompt(shot["prompt_en"], proj),
                     duration_sec=dur_sec,
                     aspect_ratio=proj["aspect_ratio"],
                     first_frame_image=first_frame_remote,
@@ -1668,6 +1704,7 @@ class StudioOrchestrator:
                     progress_cb=lambda m: _log(f"⏳ Shot {shot_order:02d}：{m}", "info"),
                 )
 
+                self._maybe_strip_audio(proj, dest_clip)
                 meta = probe_video(dest_clip)
                 dest_thumb = dirs["thumbs"] / f"shot_{shot_order:02d}.jpg"
                 extract_thumbnail(dest_clip, dest_thumb, duration_hint=meta["duration"])

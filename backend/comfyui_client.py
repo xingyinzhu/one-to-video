@@ -46,7 +46,7 @@ def compute_minimax_h3_resolution(aspect_ratio: str, vram_gb: float = 96.0) -> T
     - G4 96GB / A100 80GB（vram >= 40GB）：1280×704（對齊帖子實測）
     - L4 24GB（vram < 40GB）：960×544（精準 16:9 且為 32 倍數，省顯存防 OOM 並提速 ~2 倍）
     """
-    if vram_gb and vram_gb < 40.0:
+    if vram_gb and vram_gb < 32.0:
         return (544, 960) if aspect_ratio == "9:16" else (960, 544)
     if aspect_ratio == "9:16":
         return 704, 1280

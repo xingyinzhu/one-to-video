@@ -245,6 +245,97 @@ _REGENT_STREET_CHRISTMAS_SHOTS = [
 ]
 
 
+_WESTMINSTER_ABBEY_SHOTS = [
+    {
+        "title": "晨光高空航拍威斯敏斯特教堂與國會廣場",
+        "scene_desc_zh": "清晨柔和金光下，高空航拍緩慢向前推進，俯瞰白色石灰岩哥德式雙塔的威斯敏斯特教堂與周邊國會廣場、泰晤士河畔的倫敦天際線。",
+        "voiceover_zh": "在倫敦的心臟地帶，威斯敏斯特教堂靜靜矗立了近千年，見證了英國王室的加冕與歷史。",
+        "prompt_en": "Wide establishing aerial drone shot slowly flying forward over Westminster Abbey in London, the grand Gothic twin western towers and white limestone facade glowing in soft golden morning sunlight, Parliament Square and the River Thames in the distance, light morning mist over the city skyline",
+    },
+    {
+        "title": "街頭平視步向西大門與哥德雙塔",
+        "scene_desc_zh": "穩定器平視鏡頭沿著人行道緩步走向威斯敏斯特教堂西大門，高聳的雙塔與精細石雕立面在斜射陽光下逐步佔滿畫面。",
+        "voiceover_zh": "走近教堂西大門，歷代君王走過的石板路就在腳下，哥德式尖塔直指天空。",
+        "prompt_en": "Smooth eye-level gimbal tracking shot walking slowly toward the Great West Door of Westminster Abbey in London, visitors strolling on the pavement, the soaring Gothic twin towers and intricately carved pale limestone facade rising ahead, warm angled afternoon sunlight casting gentle shadows",
+    },
+    {
+        "title": "仰拍北立面飛扶壁與石雕尖塔",
+        "scene_desc_zh": "低角度緩慢上仰並微幅橫移，展現北入口華麗的哥德式拱門、飛扶壁與精緻石雕尖塔，背景是柔和的藍天白雲。",
+        "voiceover_zh": "飛扶壁與尖塔交織出向上的力量，每一道石雕都是中世紀工匠留下的細節。",
+        "prompt_en": "Low-angle slow upward tilt with gentle lateral movement along the North Entrance of Westminster Abbey, ornate Gothic portal, graceful flying buttresses and pointed stone pinnacles reaching toward a soft blue sky with light clouds, crisp weathered limestone details",
+    },
+    {
+        "title": "步入哥德式主殿中廊與金色光束",
+        "scene_desc_zh": "鏡頭在莊嚴的哥德式主殿中廊緩慢前推，兩側高聳的肋拱石柱向上延伸，彩色玻璃窗投下金色光束。",
+        "voiceover_zh": "步入主殿，數十公尺高的拱頂讓人不自覺放輕腳步，光線在石柱間緩緩流動。",
+        "prompt_en": "Interior slow forward dolly shot down the central nave of Westminster Abbey, towering ribbed Gothic stone vaults and clustered columns soaring overhead, golden sunbeams streaming through tall stained glass windows illuminating floating dust motes, hushed majestic atmosphere",
+    },
+    {
+        "title": "彩繪玫瑰花窗與石雕細節特寫",
+        "scene_desc_zh": "淺景深特寫，聚焦發光的彩繪玫瑰花窗與歷經數百年風化的石雕紋理，光影在彩色玻璃與石面間流動。",
+        "voiceover_zh": "彩繪玻璃把陽光化成顏色，而古老石雕上的每一道刻痕，都是時間的簽名。",
+        "prompt_en": "Intimate close-up shot with shallow depth of field of the glowing stained-glass rose window inside Westminster Abbey, jewel-toned light spilling onto weathered medieval stone carvings and tracery, subtle slow camera drift",
+    },
+    {
+        "title": "靜謐迴廊拱門與中庭花園橫移",
+        "scene_desc_zh": "平穩橫移鏡頭沿著古老石砌迴廊拱門滑行，拱門框出翠綠的中庭花園，斜陽在石地板上拉出長長的光影。",
+        "voiceover_zh": "走進迴廊，喧囂瞬間遠去，只剩下石拱門與中庭花園裡的一方寧靜。",
+        "prompt_en": "Smooth lateral dolly shot gliding along the historic Gothic stone cloisters of Westminster Abbey, rhythmic pointed arches framing a lush green courtyard garden, long afternoon shadows across worn flagstone floors, serene contemplative mood",
+    },
+    {
+        "title": "亨利七世禮拜堂扇形拱頂仰拍",
+        "scene_desc_zh": "鏡頭緩慢仰拍亨利七世禮拜堂繁複如蕾絲般的扇形石拱頂，兩側深色橡木座椅與垂掛的騎士旗幟營造莊嚴氛圍。",
+        "voiceover_zh": "抬頭仰望，扇形拱頂像石頭織成的蕾絲，是英國哥德晚期建築最動人的篇章。",
+        "prompt_en": "Slow cinematic upward tilt revealing the intricate stone fan-vaulted ceiling of the Henry VII Lady Chapel in Westminster Abbey, dark carved oak stalls and heraldic knightly banners below, warm soft light filtering from high windows",
+    },
+    {
+        "title": "夕陽黃金時刻拉遠俯瞰教堂與泰晤士河畔",
+        "scene_desc_zh": "日落黃金時刻，航拍鏡頭緩慢拉遠並微升，威斯敏斯特教堂的石灰岩立面染上橘金暖光，遠處伊莉莎白塔（大笨鐘）與泰晤士河閃耀倒影。",
+        "voiceover_zh": "夕陽為古老的石牆鍍上金邊，這座見證歷史的教堂，在暮色中安靜地結束這一天。",
+        "prompt_en": "Epic cinematic aerial pull-back shot slowly ascending away from Westminster Abbey at sunset golden hour, pale limestone towers glowing in warm amber light, the Elizabeth Tower and the River Thames reflecting a rose-gold sky in the distance, peaceful majestic documentary ending",
+    },
+]
+
+
+_CN_TOPIC_TRANSLATIONS = [
+    ("威斯敏斯特教堂", "Westminster Abbey in London"),
+    ("西敏寺", "Westminster Abbey in London"),
+    ("大笨鐘", "Big Ben and the Elizabeth Tower in London"),
+    ("白金漢宮", "Buckingham Palace in London"),
+    ("大英博物館", "the British Museum in London"),
+    ("倫敦塔橋", "Tower Bridge in London"),
+    ("倫敦", "London"),
+    ("巴黎鐵塔", "the Eiffel Tower in Paris"),
+    ("艾菲爾鐵塔", "the Eiffel Tower in Paris"),
+    ("羅浮宮", "the Louvre Museum in Paris"),
+    ("巴黎聖母院", "Notre-Dame de Paris"),
+    ("巴黎", "Paris"),
+    ("羅馬競技場", "the Colosseum in Rome"),
+    ("羅馬", "Rome"),
+    ("威尼斯", "Venice with its canals"),
+    ("富士山", "Mount Fuji in Japan"),
+    ("東京", "Tokyo"),
+    ("京都", "Kyoto"),
+    ("阿爾卑斯山", "the Swiss Alps"),
+    ("聖家堂", "the Sagrada Familia in Barcelona"),
+    ("紐約", "New York City"),
+    ("自由女神", "the Statue of Liberty"),
+    ("長城", "the Great Wall of China"),
+    ("故宮", "the Forbidden City in Beijing"),
+    ("古堡", "an ancient medieval castle"),
+    ("教堂", "a historic Gothic cathedral"),
+    ("老街", "a historic old town street"),
+]
+
+
+def translate_cn_topic_to_english(topic: str) -> str:
+    """將常見中文地標／景點轉為具體英文名詞；無法對應時回傳原文字。"""
+    for cn, en in _CN_TOPIC_TRANSLATIONS:
+        if cn in topic:
+            return en
+    return topic
+
+
 def generate_smart_draft(
     brief: str,
     target_duration: int = 60,
@@ -264,6 +355,9 @@ def generate_smart_draft(
     if "攝政" in brief or "摄政" in brief or "regent street" in lower_brief or ("倫敦" in brief and "聖誕" in brief) or ("伦敦" in brief and "圣诞" in brief):
         base_pool = _REGENT_STREET_CHRISTMAS_SHOTS
         style_lock = "倫敦聖誕前夕藍調暮色與暖金天使燈海光影 ＋ 35mm 電影實拍紀錄片質感 ＋ 濕潤路面流光倒影與紅巴士色彩點綴 ＋ 極致平穩連貫運鏡"
+    elif "威斯敏斯特" in brief or "西敏寺" in brief or "westminster" in lower_brief:
+        base_pool = _WESTMINSTER_ABBEY_SHOTS
+        style_lock = "倫敦晴朗黃金時刻自然光 ＋ 35mm 電影紀錄片質感 ＋ 白色石灰岩與哥德式石雕細節 ＋ 多機位切換（空拍／街景／仰拍／室內／特寫）＋ 穩定流暢運鏡"
     elif "溫莎" in brief or "windsor" in lower_brief:
         base_pool = _WINDSOR_SHOTS
         style_lock = "英國晴朗黃金時刻自然光 ＋ 35mm 電影紀錄片質感 ＋ 溫潤中世紀石灰岩色調 ＋ 穩定流暢運鏡"
@@ -285,55 +379,56 @@ def generate_smart_draft(
             .replace("豎屏", "")
             .strip(" ，。、！？,.!?")
         ) or brief.strip()
+        topic_en = translate_cn_topic_to_english(topic)
 
         base_pool = [
             {
                 "title": f"晨光高空遠景開場｜{topic[:12]}",
                 "scene_desc_zh": f"清晨柔和金色陽光下，高空航拍緩慢向前推進，宏觀展現「{topic}」的整體環境地貌與壯闊開場氛圍。",
                 "voiceover_zh": f"當晨光灑落大地，我們即將走進「{topic}」，展開一段沉浸式的視覺探索。",
-                "prompt_en": f"Wide establishing aerial drone shot slowly flying forward revealing the breathtaking landscape and iconic setting of {topic}, soft golden morning sunlight, atmospheric morning mist",
+                "prompt_en": f"Wide establishing aerial drone shot slowly flying forward revealing the breathtaking landscape and iconic setting of {topic_en}, soft golden morning sunlight, atmospheric morning mist",
             },
             {
                 "title": "第一人稱沉浸步入動線",
                 "scene_desc_zh": f"平穩推進的平視鏡頭，沿著入口步道緩慢走入「{topic}」核心場域，前景光影交錯帶來身歷其境感。",
                 "voiceover_zh": "順著蜿蜒的動線緩步前行，周圍的空氣與光影開始訴說屬於這裡的故事。",
-                "prompt_en": f"Smooth eye-level gimbal tracking shot walking slowly forward along the entrance pathway into {topic}, rich environmental textures, warm angled natural light casting gentle shadows",
+                "prompt_en": f"Smooth eye-level gimbal tracking shot walking slowly forward along the entrance pathway into {topic_en}, rich environmental textures, warm angled natural light casting gentle shadows",
             },
             {
                 "title": "核心主體仰拍環繞揭示",
                 "scene_desc_zh": f"鏡頭從低角度緩慢仰拍並微幅環繞，突顯「{topic}」最具代表性的主體結構與天際線輪廓。",
                 "voiceover_zh": "抬頭仰望，最具標誌性的景象矗立眼前，展現出令人屏息的空間張力。",
-                "prompt_en": f"Slow cinematic upward tilt and subtle orbital camera movement showcasing the main iconic centerpiece of {topic} against a soft natural sky, crisp realistic details",
+                "prompt_en": f"Slow cinematic upward tilt and subtle orbital camera movement showcasing the main iconic centerpiece of {topic_en} against a soft natural sky, crisp realistic details",
             },
             {
                 "title": "中景人文與空間律動橫移",
                 "scene_desc_zh": f"紀錄片中景緩慢橫移，捕捉「{topic}」現場自然流動的光影與真實環境氛圍，淺景深層次分明。",
                 "voiceover_zh": "在流動的光影之間，每一處角落都蘊藏著獨特的節奏與生命力。",
-                "prompt_en": f"Cinematic medium lateral dolly shot capturing the authentic atmosphere and subtle natural motion within {topic}, shallow depth of field, BBC documentary cinematography",
+                "prompt_en": f"Cinematic medium lateral dolly shot capturing the authentic atmosphere and subtle natural motion within {topic_en}, shallow depth of field, BBC documentary cinematography",
             },
             {
                 "title": "細節紋理與光影特寫",
                 "scene_desc_zh": f"極具質感的近景特寫鏡頭，聚焦於「{topic}」獨特的材質肌理與斜射陽光描繪出的立體輪廓。",
                 "voiceover_zh": "拉近視線細看，時間在細膩的紋理上留下了獨一無二的印記。",
-                "prompt_en": f"Intimate cinematic close-up tracking shot highlighting intricate surface textures, craftsmanship, and warm golden light grazing across details of {topic}, shallow depth of field",
+                "prompt_en": f"Intimate cinematic close-up tracking shot highlighting intricate surface textures, craftsmanship, and warm golden light grazing across details of {topic_en}, shallow depth of field",
             },
             {
                 "title": "縱深空間推進與光束氛圍",
                 "scene_desc_zh": f"鏡頭平穩穿行於「{topic}」最具空間縱深的區域，柔和自然光束灑落，營造寧靜而莊重的沉浸感。",
                 "voiceover_zh": "走進深處，靜謐的光束靜靜流淌，讓人不自覺放慢呼吸。",
-                "prompt_en": f"Serene slow forward dolly shot moving through an atmospheric space of {topic}, volumetric warm sunbeams illuminating the scene, rich contrast and natural color grading",
+                "prompt_en": f"Serene slow forward dolly shot moving through an atmospheric space of {topic_en}, volumetric warm sunbeams illuminating the scene, rich contrast and natural color grading",
             },
             {
                 "title": "黃金時刻高處開闊遠眺",
                 "scene_desc_zh": f"午後黃金時刻，鏡頭沿著高處視野緩慢滑動，俯瞰「{topic}」與遠方綿延展開的壯麗全景。",
                 "voiceover_zh": "站在高處回望，開闊的視野將整片風景盡收眼底。",
-                "prompt_en": f"Sweeping panoramic gliding shot from an elevated vantage point overlooking {topic} and the surrounding horizon during late afternoon golden hour, warm long shadows",
+                "prompt_en": f"Sweeping panoramic gliding shot from an elevated vantage point overlooking {topic_en} and the surrounding horizon during late afternoon golden hour, warm long shadows",
             },
             {
                 "title": "夕陽餘暉緩慢拉遠收尾",
                 "scene_desc_zh": f"日落暮色中，航拍鏡頭從「{topic}」緩慢向後拉遠並微升，溫暖橘金晚霞為整段旅程優雅收尾。",
                 "voiceover_zh": "伴隨著溫柔的夕陽餘暉，這場難忘的探索也在暮色中畫下完美句點。",
-                "prompt_en": f"Epic cinematic aerial pull-back shot slowly ascending away from {topic} at sunset golden hour, warm amber and rose twilight sky, peaceful majestic documentary ending",
+                "prompt_en": f"Epic cinematic aerial pull-back shot slowly ascending away from {topic_en} at sunset golden hour, warm amber and rose twilight sky, peaceful majestic documentary ending",
             },
         ]
 
