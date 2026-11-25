@@ -515,36 +515,51 @@ class ComfyUIClient:
 
                 try:
                     r_hist = client.get(f"{self.base_url}/history/{prompt_id}")
-                    if r_hist.status_code in (502, 503, 504):
-                        raise httpx.ConnectError(f"Cloudflare 暫時回應 HTTP {r_hist.status_code}")
+                    if r_hist.status_code != 200:
+                        if r_hist.status_code == 530:
+                            raise httpx.ConnectError(
+                                "Cloudflare 隧道已斷線（HTTP 530，Colab 雲端機器可能已離線或被回收）"
+                            )
+                        raise httpx.ConnectError(
+                            f"Colab 通道異常回應 HTTP {r_hist.status_code}"
+                        )
                     consecutive_net_errs = 0
                 except httpx.RequestError as net_exc:
                     consecutive_net_errs += 1
-                    if consecutive_net_errs >= 10:
+                    err_text = str(net_exc)
+                    is_tunnel_dead = (
+                        "HTTP 530" in err_text
+                        or "No address associated" in err_text
+                        or "nodename nor servname" in err_text
+                        or "Name or service not known" in err_text
+                    )
+                    max_errs = 4 if is_tunnel_dead else 10
+                    if consecutive_net_errs >= max_errs:
                         raise RuntimeError(
-                            f"輪詢 Colab 進度連續失敗 10 次：{net_exc}"
+                            f"與 Colab 雲端連線中斷（連續失敗 {consecutive_net_errs} 次）：{net_exc}"
                         ) from net_exc
                     if progress_cb and consecutive_net_errs in (2, 5):
-                        progress_cb(f"雲端通道短暫波動，自動重連中（第 {consecutive_net_errs} 次）...")
+                        progress_cb(
+                            f"雲端通道短暫波動，自動重連中（第 {consecutive_net_errs}/{max_errs} 次）..."
+                        )
                     time.sleep(poll_interval_sec)
                     continue
 
-                if r_hist.status_code == 200:
-                    hist_json = r_hist.json()
-                    if prompt_id in hist_json:
-                        job = hist_json[prompt_id]
-                        status_obj = job.get("status") or {}
-                        status_str = str(status_obj.get("status_str") or "")
-                        if status_str == "error":
-                            msgs = status_obj.get("messages") or []
-                            raise RuntimeError(f"ComfyUI 雲端執行失敗：{str(msgs)[:300]}")
+                hist_json = r_hist.json()
+                if prompt_id in hist_json:
+                    job = hist_json[prompt_id]
+                    status_obj = job.get("status") or {}
+                    status_str = str(status_obj.get("status_str") or "")
+                    if status_str == "error":
+                        msgs = status_obj.get("messages") or []
+                        raise RuntimeError(f"ComfyUI 雲端執行失敗：{str(msgs)[:300]}")
 
-                        outputs = job.get("outputs") or {}
-                        output_file_info = self._find_video_output(outputs)
-                        if output_file_info is not None:
-                            break
-                        if status_obj.get("completed"):
-                            raise RuntimeError("ComfyUI 任務已完成但未找到輸出的影片檔案。")
+                    outputs = job.get("outputs") or {}
+                    output_file_info = self._find_video_output(outputs)
+                    if output_file_info is not None:
+                        break
+                    if status_obj.get("completed"):
+                        raise RuntimeError("ComfyUI 任務已完成但未找到輸出的影片檔案。")
 
                 if progress_cb and (elapsed - last_report >= 15.0):
                     last_report = elapsed

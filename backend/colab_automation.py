@@ -348,6 +348,26 @@ class ColabCLIManager:
         )
         return (proc.stdout or "") + "\n" + (proc.stderr or "")
 
+    def keepalive_ping(self, session_name: str) -> bool:
+        """
+        每隔數分鐘透過 `colab exec` 送出輕量心跳，防止 Google Colab 在背景生片期間
+        誤判 Jupyter 閒置而強制回收雲端 GPU 機器。
+        """
+        if not session_name:
+            return False
+        try:
+            proc = subprocess.run(
+                [*self._base_cmd(), "exec", "-s", session_name, "--timeout", "30"],
+                input="print('keepalive', flush=True)\n",
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+            return proc.returncode == 0
+        except Exception:
+            return False
+
     def stop_session(self, session_name: str, log_cb: Optional[LogCallback] = None) -> bool:
         """徹底釋放並刪除指定的 Colab Runtime（等同手動點 Disconnect and delete runtime）。"""
         if not session_name:

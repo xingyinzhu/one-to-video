@@ -116,6 +116,12 @@ class StudioOrchestrator:
         for p in self.db.list_projects():
             if p.get("watcher_enabled"):
                 self.db.update_project(p["id"], watcher_enabled=False)
+            # 重啟後無任何背景生片執行緒，將殘留的「階段 ③ 執行中」重設為可續跑
+            full = self.db.get_project(p["id"], include_details=False)
+            if full and (full.get("stage_statuses") or {}).get("3") == "running":
+                sts = dict(full["stage_statuses"])
+                sts["3"] = "action_needed"
+                self.db.update_project(p["id"], stage_statuses=sts)
 
     # -------------------------
     # 路徑與系統狀態輔助
@@ -1531,6 +1537,15 @@ class StudioOrchestrator:
         cli_mgr = ColabCLIManager()
         provisioned_gpu: Optional[str] = None
         all_clips_ready = False
+        keepalive_stop = threading.Event()
+
+        def _colab_keepalive_loop() -> None:
+            # 每 3 分鐘對 Colab Jupyter Kernel 送一次輕量保活，防止多幕生成時被 Colab 誤判閒置回收
+            while not keepalive_stop.wait(180):
+                if stop_ev.is_set():
+                    break
+                if provisioned_gpu:
+                    cli_mgr.keepalive_ping(session_name)
 
         def _log(msg: str, lvl: str = "info") -> None:
             self._gen_status[project_id] = {
@@ -1555,6 +1570,13 @@ class StudioOrchestrator:
                 log_cb=_log,
             )
             self.db.update_settings({"comfyui_url": comfy_url, "video_api_provider": "comfyui_colab"})
+
+            # 啟動 Colab Kernel 保活執行緒（避免長時間生片時被 Google Colab 閒置回收）
+            threading.Thread(
+                target=_colab_keepalive_loop,
+                name=f"ColabKeepAlive-{project_id}",
+                daemon=True,
+            ).start()
 
             # 3. 等待 Cloudflare DNS 生效、連線確認與依 GPU 等級自動安全調優
             client = ComfyUIClient(comfy_url)
@@ -1697,6 +1719,7 @@ class StudioOrchestrator:
                 stage=3,
             )
         finally:
+            keepalive_stop.set()
             # 保證無論成功、失敗或手動中斷，皆自動關閉 Colab Runtime 停止扣計算單元！
             if auto_stop and provisioned_gpu:
                 cli_mgr.stop_session(
