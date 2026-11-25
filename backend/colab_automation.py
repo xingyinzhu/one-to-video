@@ -149,128 +149,158 @@ def complete_colab_oauth_flow(auth_code: str) -> Dict[str, Any]:
 # 雲端 ComfyUI + MiniMax H3 + Cloudflare Tunnel 一鍵非阻塞部署腳本
 # -------------------------
 REMOTE_BOOTSTRAP_SCRIPT = r'''
-import os, re, shutil, subprocess, sys, time, urllib.request
+import os, re, shutil, subprocess, sys, threading, time, urllib.request
 from pathlib import Path
 
-print("=== [1/4] 檢查雲端 GPU 與環境 ===", flush=True)
-gpu_info = subprocess.run(
-    ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
-    capture_output=True, text=True, check=True
-).stdout.strip()
-mem_mb = int(subprocess.run(
-    ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-    capture_output=True, text=True, check=True
-).stdout.strip().splitlines()[0])
-print(f"GPU: {gpu_info} ({mem_mb/1024:.1f} GB VRAM)", flush=True)
+_hb_stop = threading.Event()
+_hb_state = {"stage": "初始化雲端環境", "t0": time.time()}
 
-COMFY_DIR = Path("/content/ComfyUI")
-if not COMFY_DIR.exists():
-    print("=== [2/4] 安裝最新官方 ComfyUI 與 comfy-kitchen ===", flush=True)
-    subprocess.run(["git", "clone", "--depth", "1", "https://github.com/Comfy-Org/ComfyUI.git", str(COMFY_DIR)], check=True)
-    subprocess.run(["pip", "install", "-q", "-r", str(COMFY_DIR / "requirements.txt")], check=True)
-    subprocess.run(["pip", "install", "-q", "--upgrade", "comfy-kitchen", "huggingface_hub[hf_transfer]", "imageio-ffmpeg", "opencv-python-headless"], check=True)
-else:
-    print("=== [2/4] ComfyUI 已安裝，略過重裝 ===", flush=True)
+def _heartbeat_loop():
+    while not _hb_stop.wait(20):
+        elapsed = int(time.time() - _hb_state["t0"])
+        print(f"HEARTBEAT: {_hb_state['stage']}（已耗時 {elapsed} 秒，持續運作中）", flush=True)
 
-vhs_dir = COMFY_DIR / "custom_nodes" / "ComfyUI-VideoHelperSuite"
-if not vhs_dir.exists():
-    subprocess.run(["git", "clone", "--depth", "1", "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git", str(vhs_dir)], check=True)
-    subprocess.run(["pip", "install", "-q", "-r", str(vhs_dir / "requirements.txt")], check=False)
+threading.Thread(target=_heartbeat_loop, daemon=True).start()
 
-upscale_dir = COMFY_DIR / "models" / "upscale_models"
-upscale_dir.mkdir(parents=True, exist_ok=True)
-esrgan_path = upscale_dir / "RealESRGAN_x2plus.pth"
-if not esrgan_path.exists():
-    subprocess.run([
-        "curl", "-sL", "-o", str(esrgan_path),
-        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
-    ], check=False)
+try:
+    _hb_state["stage"] = "[1/4] 檢查雲端 GPU 與環境"
+    print("=== [1/4] 檢查雲端 GPU 與環境 ===", flush=True)
+    gpu_info = subprocess.run(
+        ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+        capture_output=True, text=True, check=True
+    ).stdout.strip()
+    mem_mb = int(subprocess.run(
+        ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+        capture_output=True, text=True, check=True
+    ).stdout.strip().splitlines()[0])
+    print(f"GPU: {gpu_info} ({mem_mb/1024:.1f} GB VRAM)", flush=True)
 
-print("=== [3/4] 下載官方開源 MiniMax H3 權重（自動適配 GPU 架構） ===", flush=True)
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-from huggingface_hub import hf_hub_download
+    COMFY_DIR = Path("/content/ComfyUI")
+    if not COMFY_DIR.exists():
+        _hb_state["stage"] = "[2/4] 安裝最新官方 ComfyUI 與相依套件"
+        print("=== [2/4] 安裝最新官方 ComfyUI 與 comfy-kitchen ===", flush=True)
+        subprocess.run(["git", "clone", "--depth", "1", "https://github.com/Comfy-Org/ComfyUI.git", str(COMFY_DIR)], check=True)
+        subprocess.run(["pip", "install", "-q", "-r", str(COMFY_DIR / "requirements.txt")], check=True)
+        subprocess.run(["pip", "install", "-q", "--upgrade", "comfy-kitchen", "huggingface_hub[hf_transfer]", "imageio-ffmpeg", "opencv-python-headless"], check=True)
+    else:
+        print("=== [2/4] ComfyUI 已安裝，略過重裝 ===", flush=True)
 
-is_blackwell = any(k in gpu_info.upper() for k in ("PRO 6000", "5090", "B200", "GB", "BLACKWELL"))
-text_enc = (
-    "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
-    if is_blackwell else
-    "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
-)
-COMFY_MODELS = COMFY_DIR / "models"
-FILES = [
-    ("diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors", COMFY_MODELS / "diffusion_models"),
-    (text_enc, COMFY_MODELS / "text_encoders"),
-    ("vae/minimax_h3_video_vae_fp16.safetensors", COMFY_MODELS / "vae"),
-    ("vae/minimax_h3_audio_vae_fp32.safetensors", COMFY_MODELS / "vae"),
-]
-for hf_path, target_dir in FILES:
-    target_dir.mkdir(parents=True, exist_ok=True)
-    fname = Path(hf_path).name
-    fpath = target_dir / fname
-    if fpath.exists() and fpath.stat().st_size > 10_000_000:
-        print(f"SKIP_EXISTS: {fname}", flush=True)
-        continue
-    print(f"DOWNLOADING: {hf_path}", flush=True)
-    hf_hub_download(repo_id="Comfy-Org/MiniMax-H3", filename=hf_path, local_dir=str(COMFY_MODELS))
-    print(f"DOWNLOADED: {fname}", flush=True)
+    vhs_dir = COMFY_DIR / "custom_nodes" / "ComfyUI-VideoHelperSuite"
+    if not vhs_dir.exists():
+        _hb_state["stage"] = "[2/4] 安裝 VideoHelperSuite 節點"
+        subprocess.run(["git", "clone", "--depth", "1", "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git", str(vhs_dir)], check=True)
+        subprocess.run(["pip", "install", "-q", "-r", str(vhs_dir / "requirements.txt")], check=False)
 
-print("=== [4/4] 背景啟動 ComfyUI 與 Cloudflare 安全通道 ===", flush=True)
-cf_bin = Path("/usr/local/bin/cloudflared")
-if not cf_bin.exists():
-    subprocess.run([
-        "curl", "-sL", "-o", str(cf_bin),
-        "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
-    ], check=True)
-    cf_bin.chmod(0o755)
+    upscale_dir = COMFY_DIR / "models" / "upscale_models"
+    upscale_dir.mkdir(parents=True, exist_ok=True)
+    esrgan_path = upscale_dir / "RealESRGAN_x2plus.pth"
+    if not esrgan_path.exists():
+        subprocess.run([
+            "curl", "-sL", "-o", str(esrgan_path),
+            "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
+        ], check=False)
 
-subprocess.run(["pkill", "-f", "ComfyUI/main.py"], check=False)
-subprocess.run(["pkill", "-f", "cloudflared"], check=False)
-time.sleep(1)
+    _hb_state["stage"] = "[3/4] 下載官方開源 MiniMax H3 權重"
+    print("=== [3/4] 下載官方開源 MiniMax H3 權重（自動適配 GPU 架構） ===", flush=True)
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+    from huggingface_hub import hf_hub_download
 
-comfy_cmd = ["python", "/content/ComfyUI/main.py", "--listen", "0.0.0.0", "--port", "8188", "--preview-method", "none"]
-if mem_mb >= 70000:
-    comfy_cmd.append("--highvram")
+    is_blackwell = any(k in gpu_info.upper() for k in ("PRO 6000", "5090", "B200", "GB", "BLACKWELL"))
+    text_enc_primary = (
+        "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+        if is_blackwell else
+        "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    )
+    text_enc_fallback = "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    COMFY_MODELS = COMFY_DIR / "models"
+    FILES = [
+        ("diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors", COMFY_MODELS / "diffusion_models", None),
+        (text_enc_primary, COMFY_MODELS / "text_encoders", text_enc_fallback if text_enc_primary != text_enc_fallback else None),
+        ("vae/minimax_h3_video_vae_fp16.safetensors", COMFY_MODELS / "vae", None),
+        ("vae/minimax_h3_audio_vae_fp32.safetensors", COMFY_MODELS / "vae", None),
+    ]
+    for hf_path, target_dir, fallback_path in FILES:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        fname = Path(hf_path).name
+        fpath = target_dir / fname
+        if fpath.exists() and fpath.stat().st_size > 10_000_000:
+            print(f"SKIP_EXISTS: {fname}", flush=True)
+            continue
+        _hb_state["stage"] = f"[3/4] 下載權重 {fname}"
+        print(f"DOWNLOADING: {hf_path}", flush=True)
+        try:
+            hf_hub_download(repo_id="Comfy-Org/MiniMax-H3", filename=hf_path, local_dir=str(COMFY_MODELS))
+            print(f"DOWNLOADED: {fname}", flush=True)
+        except Exception as dl_err:
+            if fallback_path:
+                fb_name = Path(fallback_path).name
+                print(f"FALLBACK_DOWNLOAD: {hf_path} 不可用，改下載 {fallback_path}", flush=True)
+                _hb_state["stage"] = f"[3/4] 改下載備援權重 {fb_name}"
+                hf_hub_download(repo_id="Comfy-Org/MiniMax-H3", filename=fallback_path, local_dir=str(COMFY_MODELS))
+                print(f"DOWNLOADED: {fb_name}", flush=True)
+            else:
+                raise dl_err
 
-comfy_log = open("/content/comfyui.log", "w")
-subprocess.Popen(comfy_cmd, cwd="/content/ComfyUI", stdout=comfy_log, stderr=subprocess.STDOUT, start_new_session=True)
+    _hb_state["stage"] = "[4/4] 啟動 ComfyUI 與 Cloudflare 安全通道"
+    print("=== [4/4] 背景啟動 ComfyUI 與 Cloudflare 安全通道 ===", flush=True)
+    cf_bin = Path("/usr/local/bin/cloudflared")
+    if not cf_bin.exists():
+        subprocess.run([
+            "curl", "-sL", "-o", str(cf_bin),
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+        ], check=True)
+        cf_bin.chmod(0o755)
 
-ready = False
-for _ in range(90):
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=2) as resp:
-            if resp.status == 200:
-                ready = True
+    subprocess.run(["pkill", "-f", "ComfyUI/main.py"], check=False)
+    subprocess.run(["pkill", "-f", "cloudflared"], check=False)
+    time.sleep(1)
+
+    comfy_cmd = ["python", "/content/ComfyUI/main.py", "--listen", "0.0.0.0", "--port", "8188", "--preview-method", "none"]
+    if mem_mb >= 70000:
+        comfy_cmd.append("--highvram")
+
+    comfy_log = open("/content/comfyui.log", "w")
+    subprocess.Popen(comfy_cmd, cwd="/content/ComfyUI", stdout=comfy_log, stderr=subprocess.STDOUT, start_new_session=True)
+
+    ready = False
+    for _ in range(90):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=2) as resp:
+                if resp.status == 200:
+                    ready = True
+                    break
+        except Exception:
+            time.sleep(1)
+
+    if not ready:
+        print("COMFYUI_BOOT_FAILED:", Path("/content/comfyui.log").read_text()[-1500:], flush=True)
+        sys.exit(1)
+
+    cf_log_path = Path("/content/cloudflared.log")
+    cf_log = open(cf_log_path, "w")
+    subprocess.Popen(
+        [str(cf_bin), "tunnel", "--url", "http://127.0.0.1:8188", "--no-autoupdate"],
+        stdout=cf_log, stderr=subprocess.STDOUT, start_new_session=True
+    )
+
+    public_url = None
+    t0 = time.time()
+    while time.time() - t0 < 35:
+        if cf_log_path.exists():
+            txt = cf_log_path.read_text(errors="ignore")
+            m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", txt)
+            if m:
+                public_url = m.group(0)
                 break
-    except Exception:
-        time.sleep(1)
+        time.sleep(0.8)
 
-if not ready:
-    print("COMFYUI_BOOT_FAILED:", Path("/content/comfyui.log").read_text()[-1500:], flush=True)
-    sys.exit(1)
+    if not public_url:
+        print("TUNNEL_FAILED:", cf_log_path.read_text(errors="ignore")[-1000:], flush=True)
+        sys.exit(1)
 
-cf_log_path = Path("/content/cloudflared.log")
-cf_log = open(cf_log_path, "w")
-subprocess.Popen(
-    [str(cf_bin), "tunnel", "--url", "http://127.0.0.1:8188", "--no-autoupdate"],
-    stdout=cf_log, stderr=subprocess.STDOUT, start_new_session=True
-)
-
-public_url = None
-t0 = time.time()
-while time.time() - t0 < 35:
-    if cf_log_path.exists():
-        txt = cf_log_path.read_text(errors="ignore")
-        m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", txt)
-        if m:
-            public_url = m.group(0)
-            break
-    time.sleep(0.8)
-
-if not public_url:
-    print("TUNNEL_FAILED:", cf_log_path.read_text(errors="ignore")[-1000:], flush=True)
-    sys.exit(1)
-
-print(f"DIRECTOR_COMFYUI_URL={public_url}", flush=True)
+    print(f"DIRECTOR_COMFYUI_URL={public_url}", flush=True)
+finally:
+    _hb_stop.set()
 '''
 
 
@@ -405,7 +435,7 @@ class ColabCLIManager:
                 log_cb("📦 已自動推送部署腳本至 Colab GPU（安裝 ComfyUI ＋ 高速下載 MiniMax H3 權重約 3～5 分鐘）...", "info")
 
             proc = subprocess.Popen(
-                [*self._base_cmd(), "exec", "-s", session_name, "-f", str(tmp_script)],
+                [*self._base_cmd(), "exec", "-s", session_name, "--timeout", "900", "-f", str(tmp_script)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -432,16 +462,19 @@ class ColabCLIManager:
                 if m_url:
                     captured_url = m_url.group(1)
 
-                # 把關鍵中文／下載進度轉播給前端即時 Log
+                # 把關鍵中文／下載進度與心跳轉播給前端即時 Log
                 if log_cb and (
                     line.startswith("===")
                     or line.startswith("GPU:")
                     or line.startswith("DOWNLOADING:")
                     or line.startswith("DOWNLOADED:")
+                    or line.startswith("FALLBACK_DOWNLOAD:")
                     or line.startswith("SKIP_EXISTS:")
+                    or line.startswith("HEARTBEAT:")
                     or "DIRECTOR_COMFYUI_URL=" in line
                 ):
-                    log_cb(f"☁️ [Colab 雲端] {line}", "info")
+                    clean_line = line.replace("HEARTBEAT: ", "⏳ ")
+                    log_cb(f"☁️ [Colab 雲端] {clean_line}", "info")
 
             ret = proc.wait(timeout=30)
             if ret != 0 or not captured_url:
