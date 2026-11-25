@@ -284,13 +284,17 @@ try:
     )
 
     public_url = None
+    tunnel_registered = False
     t0 = time.time()
-    while time.time() - t0 < 35:
+    while time.time() - t0 < 45:
         if cf_log_path.exists():
             txt = cf_log_path.read_text(errors="ignore")
-            m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", txt)
-            if m:
-                public_url = m.group(0)
+            if not public_url:
+                m = re.search(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com", txt)
+                if m:
+                    public_url = m.group(0)
+            if public_url and ("Registered tunnel connection" in txt or (time.time() - t0 > 12)):
+                tunnel_registered = True
                 break
         time.sleep(0.8)
 
@@ -298,6 +302,19 @@ try:
         print("TUNNEL_FAILED:", cf_log_path.read_text(errors="ignore")[-1000:], flush=True)
         sys.exit(1)
 
+    # 在雲端先行確認 Cloudflare Tunnel 外網連線與 DNS 皆已就緒，避免本機過早查詢觸發負向 DNS 快取
+    _hb_state["stage"] = "[4/4] 等待 Cloudflare 安全通道全球生效"
+    edge_ready = False
+    for _ in range(30):
+        try:
+            with urllib.request.urlopen(f"{public_url}/system_stats", timeout=4) as resp:
+                if resp.status == 200:
+                    edge_ready = True
+                    break
+        except Exception:
+            time.sleep(2)
+    if not edge_ready:
+        time.sleep(4)
     print(f"DIRECTOR_COMFYUI_URL={public_url}", flush=True)
 finally:
     _hb_stop.set()

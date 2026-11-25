@@ -100,7 +100,12 @@ function connectProjectSSE(projectId) {
   state.eventSource = es;
   $("sseConnBadge").textContent = "🟢 即時監控連線中";
 
+  es.onopen = () => {
+    $("sseConnBadge").textContent = "🟢 即時監控連線中";
+  };
+
   es.onmessage = (evt) => {
+    $("sseConnBadge").textContent = "🟢 即時監控連線中";
     try {
       const payload = JSON.parse(evt.data);
       if (payload.project) {

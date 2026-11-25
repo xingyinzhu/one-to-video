@@ -1202,7 +1202,12 @@ class StudioOrchestrator:
     ) -> None:
         try:
             client = ComfyUIClient(comfyui_url)
-            conn_info = client.check_connection()
+            conn_info = client.wait_until_ready(
+                max_wait_sec=45.0,
+                retry_interval_sec=3.0,
+                stop_event=stop_ev,
+                progress_cb=lambda m: self.log_and_broadcast(project_id, f"🌐 {m}", level="info", stage=3),
+            )
             models = conn_info.get("models") or {}
             can_esrgan = enable_realesrgan and bool(conn_info.get("has_realesrgan"))
             can_turbo = use_turbo and bool(conn_info.get("has_turbo_lora"))
@@ -1241,9 +1246,14 @@ class StudioOrchestrator:
                         (s for s in latest_shots if int(s["shot_order"]) == shot_order - 1 and s["status"] == "done"),
                         None,
                     )
-                    if prev_shot and prev_shot.get("clip_path") and Path(prev_shot["clip_path"]).is_file():
+                    prev_clip = (
+                        resolve_project_media_path(prev_shot.get("clip_path") or "", project_id, "clips")
+                        if prev_shot
+                        else None
+                    )
+                    if prev_clip:
                         last_frame_local = dirs["temp"] / f"relay_from_shot_{shot_order - 1:02d}.png"
-                        extract_last_frame(Path(prev_shot["clip_path"]), last_frame_local)
+                        extract_last_frame(prev_clip, last_frame_local)
                         remote_fname = f"{project_id}_relay_to_shot_{shot_order:02d}.png"
                         first_frame_remote = client.upload_image(last_frame_local, remote_name=remote_fname)
                         self.log_and_broadcast(
@@ -1546,9 +1556,14 @@ class StudioOrchestrator:
             )
             self.db.update_settings({"comfyui_url": comfy_url, "video_api_provider": "comfyui_colab"})
 
-            # 3. 連線確認與依 GPU 等級自動安全調優
+            # 3. 等待 Cloudflare DNS 生效、連線確認與依 GPU 等級自動安全調優
             client = ComfyUIClient(comfy_url)
-            conn_info = client.check_connection()
+            conn_info = client.wait_until_ready(
+                max_wait_sec=90.0,
+                retry_interval_sec=3.0,
+                stop_event=stop_ev,
+                progress_cb=lambda m: _log(f"🌐 {m}", "info"),
+            )
             vram_gb = float(conn_info.get("vram_total_gb") or 24.0)
             models = conn_info.get("models") or {}
 
@@ -1586,9 +1601,14 @@ class StudioOrchestrator:
                         (s for s in latest_shots if int(s["shot_order"]) == shot_order - 1 and s["status"] == "done"),
                         None,
                     )
-                    if prev_shot and prev_shot.get("clip_path") and Path(prev_shot["clip_path"]).is_file():
+                    prev_clip = (
+                        resolve_project_media_path(prev_shot.get("clip_path") or "", project_id, "clips")
+                        if prev_shot
+                        else None
+                    )
+                    if prev_clip:
                         last_frame_local = dirs["temp"] / f"relay_from_shot_{shot_order - 1:02d}.png"
-                        extract_last_frame(Path(prev_shot["clip_path"]), last_frame_local)
+                        extract_last_frame(prev_clip, last_frame_local)
                         remote_fname = f"{project_id}_relay_to_shot_{shot_order:02d}.png"
                         first_frame_remote = client.upload_image(last_frame_local, remote_name=remote_fname)
                         _log(f"🔗 已擷取 Shot {shot_order - 1:02d} 尾幀並上傳，接力生成 Shot {shot_order:02d}！", "info")

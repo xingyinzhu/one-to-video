@@ -6,6 +6,9 @@ services:
       dockerfile: Dockerfile
     container_name: one-to-video
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "8787:8787"
     environment:

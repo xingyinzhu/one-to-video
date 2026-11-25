@@ -202,18 +202,63 @@ class ComfyUIClient:
                 "models": detected_models,
             }
 
+    def wait_until_ready(
+        self,
+        max_wait_sec: float = 90.0,
+        retry_interval_sec: float = 3.0,
+        stop_event: Optional[threading.Event] = None,
+        progress_cb: Optional[ProgressCb] = None,
+    ) -> Dict[str, Any]:
+        """
+        等待新建立的 Cloudflare Quick Tunnel 完成全球 DNS 生效並連線至 ComfyUI。
+        容忍初期常見的 DNS 尚未生效（Errno -5 / nodename nor servname）、TLS 握手或 502/503/504。
+        """
+        deadline = time.time() + max_wait_sec
+        attempt = 0
+        last_exc: Optional[Exception] = None
+        while True:
+            if stop_event and stop_event.is_set():
+                raise InterruptedError("使用者已中止連線等待。")
+            attempt += 1
+            try:
+                return self.check_connection()
+            except Exception as exc:
+                last_exc = exc
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        f"等待 Colab ComfyUI 通道生效逾時（已重試 {attempt} 次 / {int(max_wait_sec)} 秒）：{last_exc}"
+                    ) from last_exc
+                if progress_cb and (attempt == 1 or attempt % 3 == 0):
+                    progress_cb(
+                        f"等待 Cloudflare 安全通道 DNS 生效中（第 {attempt} 次嘗試，尚餘約 {int(remaining)} 秒）..."
+                    )
+                sleep_sec = min(retry_interval_sec, max(0.2, remaining))
+                if stop_event:
+                    stop_event.wait(sleep_sec)
+                else:
+                    time.sleep(sleep_sec)
+
     def upload_image(self, image_path: Path, remote_name: Optional[str] = None) -> str:
-        """上傳首幀參考圖（前一幕尾幀）至 ComfyUI input 資料夾。"""
+        """上傳首幀參考圖（前一幕尾幀）至 ComfyUI input 資料夾（內建瞬斷重試）。"""
         p = Path(image_path).resolve()
         filename = remote_name or p.name
-        with self._http_client() as client:
-            with open(p, "rb") as f:
-                files = {"image": (filename, f, "image/png")}
-                data = {"overwrite": "true", "type": "input"}
-                resp = client.post(f"{self.base_url}/upload/image", files=files, data=data)
-                resp.raise_for_status()
-                res = resp.json()
-                return str(res.get("name") or filename)
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                with self._http_client() as client:
+                    with open(p, "rb") as f:
+                        files = {"image": (filename, f, "image/png")}
+                        data = {"overwrite": "true", "type": "input"}
+                        resp = client.post(f"{self.base_url}/upload/image", files=files, data=data)
+                        resp.raise_for_status()
+                        res = resp.json()
+                        return str(res.get("name") or filename)
+            except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                last_exc = exc
+                if attempt < 3:
+                    time.sleep(2.0 * attempt)
+        raise RuntimeError(f"上傳首尾幀接力圖片失敗：{last_exc}") from last_exc
 
     def interrupt(self) -> None:
         try:
@@ -427,10 +472,24 @@ class ComfyUIClient:
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         with self._http_client() as client:
-            r_submit = client.post(
-                f"{self.base_url}/prompt",
-                json={"prompt": workflow, "client_id": self.client_id},
-            )
+            r_submit: Optional[httpx.Response] = None
+            last_submit_exc: Optional[Exception] = None
+            for attempt in range(1, 4):
+                try:
+                    r_submit = client.post(
+                        f"{self.base_url}/prompt",
+                        json={"prompt": workflow, "client_id": self.client_id},
+                    )
+                    if r_submit.status_code in (502, 503, 504) and attempt < 3:
+                        time.sleep(2.0 * attempt)
+                        continue
+                    break
+                except httpx.RequestError as exc:
+                    last_submit_exc = exc
+                    if attempt < 3:
+                        time.sleep(2.0 * attempt)
+            if r_submit is None:
+                raise RuntimeError(f"送出 ComfyUI 任務連線失敗：{last_submit_exc}") from last_submit_exc
             if r_submit.status_code != 200:
                 raise RuntimeError(
                     f"ComfyUI 拒絕工作流請求 (HTTP {r_submit.status_code})：{r_submit.text[:300]}"
@@ -442,6 +501,7 @@ class ComfyUIClient:
 
             start_t = time.time()
             last_report = 0.0
+            consecutive_net_errs = 0
             output_file_info: Optional[Dict[str, str]] = None
 
             while True:
@@ -453,7 +513,22 @@ class ComfyUIClient:
                 if elapsed > max_wait_sec:
                     raise TimeoutError(f"等待 Colab ComfyUI 生成逾時（超過 {int(max_wait_sec)} 秒）。")
 
-                r_hist = client.get(f"{self.base_url}/history/{prompt_id}")
+                try:
+                    r_hist = client.get(f"{self.base_url}/history/{prompt_id}")
+                    if r_hist.status_code in (502, 503, 504):
+                        raise httpx.ConnectError(f"Cloudflare 暫時回應 HTTP {r_hist.status_code}")
+                    consecutive_net_errs = 0
+                except httpx.RequestError as net_exc:
+                    consecutive_net_errs += 1
+                    if consecutive_net_errs >= 10:
+                        raise RuntimeError(
+                            f"輪詢 Colab 進度連續失敗 10 次：{net_exc}"
+                        ) from net_exc
+                    if progress_cb and consecutive_net_errs in (2, 5):
+                        progress_cb(f"雲端通道短暫波動，自動重連中（第 {consecutive_net_errs} 次）...")
+                    time.sleep(poll_interval_sec)
+                    continue
+
                 if r_hist.status_code == 200:
                     hist_json = r_hist.json()
                     if prompt_id in hist_json:
@@ -474,11 +549,11 @@ class ComfyUIClient:
                 if progress_cb and (elapsed - last_report >= 15.0):
                     last_report = elapsed
                     mins, secs = divmod(int(elapsed), 60)
-                    progress_cb(f"Colab G4 雲端生成中... 已耗時 {mins} 分 {secs:02d} 秒")
+                    progress_cb(f"Colab 雲端生成中... 已耗時 {mins} 分 {secs:02d} 秒")
 
                 time.sleep(poll_interval_sec)
 
-            # 下載產出影片
+            # 下載產出影片（內建 3 次瞬斷重試）
             params = {
                 "filename": output_file_info["filename"],
                 "subfolder": output_file_info.get("subfolder", ""),
@@ -487,11 +562,22 @@ class ComfyUIClient:
             if progress_cb:
                 progress_cb(f"雲端生成完畢，正在下載影片「{params['filename']}」回本機...")
 
-            with client.stream("GET", f"{self.base_url}/view", params=params, timeout=180.0) as dl:
-                dl.raise_for_status()
-                with open(dest, "wb") as f_out:
-                    for chunk in dl.iter_bytes(chunk_size=1024 * 256):
-                        f_out.write(chunk)
+            last_dl_exc: Optional[Exception] = None
+            for dl_attempt in range(1, 4):
+                try:
+                    with client.stream("GET", f"{self.base_url}/view", params=params, timeout=180.0) as dl:
+                        dl.raise_for_status()
+                        with open(dest, "wb") as f_out:
+                            for chunk in dl.iter_bytes(chunk_size=1024 * 256):
+                                f_out.write(chunk)
+                    last_dl_exc = None
+                    break
+                except (httpx.RequestError, httpx.HTTPStatusError) as dl_exc:
+                    last_dl_exc = dl_exc
+                    if dl_attempt < 3:
+                        time.sleep(2.5 * dl_attempt)
+            if last_dl_exc is not None:
+                raise RuntimeError(f"下載雲端生成影片失敗：{last_dl_exc}") from last_dl_exc
 
         if not dest.is_file() or dest.stat().st_size < 1024:
             raise RuntimeError("下載回來的影片檔案異常過小或空白。")
