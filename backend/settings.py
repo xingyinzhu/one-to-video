@@ -47,6 +47,25 @@ def ensure_base_dirs() -> None:
     get_projects_dir().mkdir(parents=True, exist_ok=True)
 
 
+def resolve_project_media_path(
+    stored_path: str, project_id: str, subdir: str
+) -> Optional[Path]:
+    """
+    跨環境（macOS 本機 ⇄ Docker 容器）相容路徑解析：
+    優先檢查原始路徑；若因掛載路徑不同（例如 /Users/.../data 與 /app/data）不存在，
+    自動定位至目前執行環境的 projects/<project_id>/<subdir>/<filename>。
+    """
+    if not stored_path:
+        return None
+    direct = Path(stored_path)
+    if direct.is_file():
+        return direct
+    candidate = get_projects_dir() / project_id / subdir / direct.name
+    if candidate.is_file():
+        return candidate
+    return None
+
+
 def _find_exec(binary_name: str, env_key: str) -> Optional[str]:
     """依序檢查環境變數、macOS Homebrew 常見路徑與系統 PATH。"""
     env_override = os.environ.get(env_key)

@@ -25,7 +25,13 @@ from .colab_automation import (
     start_colab_oauth_flow,
 )
 from .orchestrator import StudioOrchestrator
-from .settings import BASE_DIR, FRONTEND_DIR, SERVER_HOST, SERVER_PORT
+from .settings import (
+    BASE_DIR,
+    FRONTEND_DIR,
+    SERVER_HOST,
+    SERVER_PORT,
+    resolve_project_media_path,
+)
 
 orchestrator = StudioOrchestrator()
 
@@ -567,8 +573,8 @@ async def api_get_shot_thumb(project_id: str, shot_id: int) -> FileResponse:
     shot = orchestrator.db.get_shot(shot_id)
     if not shot or shot["project_id"] != project_id or not shot["thumb_path"]:
         raise HTTPException(status_code=404, detail="縮圖不存在")
-    p = Path(shot["thumb_path"])
-    if not p.is_file():
+    p = resolve_project_media_path(shot["thumb_path"], project_id, "thumbs")
+    if not p:
         raise HTTPException(status_code=404, detail="縮圖檔案不存在")
     return FileResponse(str(p), media_type="image/jpeg")
 
@@ -578,8 +584,8 @@ async def api_get_shot_clip(project_id: str, shot_id: int) -> FileResponse:
     shot = orchestrator.db.get_shot(shot_id)
     if not shot or shot["project_id"] != project_id or not shot["clip_path"]:
         raise HTTPException(status_code=404, detail="片段不存在")
-    p = Path(shot["clip_path"])
-    if not p.is_file():
+    p = resolve_project_media_path(shot["clip_path"], project_id, "clips")
+    if not p:
         raise HTTPException(status_code=404, detail="片段檔案不存在")
     return FileResponse(str(p), media_type="video/mp4")
 
@@ -592,8 +598,8 @@ async def api_get_output_video(
     if not proj:
         raise HTTPException(status_code=404, detail="找不到此專案")
     meta = proj.get("output_meta") or {}
-    out_p = Path(meta.get("output_path") or "")
-    if not out_p.is_file():
+    out_p = resolve_project_media_path(meta.get("output_path") or "", project_id, "output")
+    if not out_p:
         desk_p = Path(meta.get("desktop_path") or "")
         if desk_p.is_file():
             out_p = desk_p

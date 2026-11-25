@@ -28,6 +28,7 @@ from .settings import (
     detect_ffmpeg_binaries,
     get_default_desktop_output_dir,
     get_default_downloads_dir,
+    resolve_project_media_path,
 )
 from .video_engine import (
     extract_last_frame,
@@ -775,11 +776,14 @@ class StudioOrchestrator:
             if not proj:
                 raise ValueError("找不到指定專案。")
 
-            ready_shots = [
-                s
-                for s in (proj.get("shots") or [])
-                if s["status"] == "done" and s["clip_path"] and Path(s["clip_path"]).is_file()
-            ]
+            ready_shots = []
+            for s in (proj.get("shots") or []):
+                if s["status"] == "done" and s["clip_path"]:
+                    rp = resolve_project_media_path(s["clip_path"], project_id, "clips")
+                    if rp:
+                        s_copy = dict(s)
+                        s_copy["clip_path"] = str(rp)
+                        ready_shots.append(s_copy)
             if not ready_shots:
                 raise ValueError("尚無任何已完成的鏡頭素材，無法開始剪輯合成。")
 
@@ -842,11 +846,14 @@ class StudioOrchestrator:
             if not proj:
                 return
             dirs = self.db.get_project_dirs(project_id)
-            ready_shots = [
-                s
-                for s in (proj.get("shots") or [])
-                if s["status"] == "done" and s["clip_path"] and Path(s["clip_path"]).is_file()
-            ]
+            ready_shots = []
+            for s in (proj.get("shots") or []):
+                if s["status"] == "done" and s["clip_path"]:
+                    rp = resolve_project_media_path(s["clip_path"], project_id, "clips")
+                    if rp:
+                        s_copy = dict(s)
+                        s_copy["clip_path"] = str(rp)
+                        ready_shots.append(s_copy)
             opts = proj["render_options"]
 
             def on_progress(pct: int, substep: str, detail_msg: str) -> None:
