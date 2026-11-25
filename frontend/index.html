@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 紀錄片導演工作台｜一句話到成片</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- 左側邊欄：品牌與歷史專案列表 -->
+    <aside class="sidebar">
+      <div class="brand-box">
+        <div class="brand-logo">🎬</div>
+        <div>
+          <h1 class="brand-title">AI 導演工作台</h1>
+          <p class="brand-sub">One-Sentence to Video</p>
+        </div>
+      </div>
+
+      <button id="btnNewProject" class="btn btn-primary btn-block">
+        ＋ 建立新影片專案
+      </button>
+
+      <div class="sidebar-section-header">
+        <span>歷史專案紀錄</span>
+        <span id="projectCountBadge" class="count-pill">0</span>
+      </div>
+
+      <div id="projectList" class="project-list">
+        <div class="empty-hint">尚無歷史專案，寫一句話立即開拍！</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div id="colabAuthBadge" class="health-badge health-clickable" title="點擊管理 Google Colab 全自動授權">
+          <span class="dot dot-pending"></span>
+          <span>檢查 Colab 授權...</span>
+        </div>
+        <div id="ffmpegHealthBadge" class="health-badge">
+          <span class="dot dot-pending"></span>
+          <span>正在檢查 FFmpeg...</span>
+        </div>
+        <button id="btnOpenSettings" class="btn btn-ghost btn-block">
+          ⚙️ 系統與大腦設定（選填）
+        </button>
+      </div>
+    </aside>
+
+    <!-- 中央主工作區 -->
+    <div class="main-area">
+      <!-- 頂部固定 5 階段流水線進度條 (Pipeline Stepper) -->
+      <header class="pipeline-header">
+        <div class="pipeline-top-bar">
+          <div class="active-proj-info">
+            <span id="currentProjBadge" class="proj-tag">新專案準備中</span>
+            <h2 id="currentProjTitle" class="proj-heading">用一句話啟動你的 AI 紀錄片流水線</h2>
+          </div>
+          <div class="legend-bar">
+            <span class="legend-item"><i class="dot dot-pending"></i>等待中</span>
+            <span class="legend-item"><i class="dot dot-running"></i>執行中</span>
+            <span class="legend-item"><i class="dot dot-action"></i>等你動手</span>
+            <span class="legend-item"><i class="dot dot-done"></i>已完成</span>
+            <span class="legend-item"><i class="dot dot-failed"></i>失敗</span>
+          </div>
+        </div>
+
+        <nav id="pipelineStepper" class="pipeline-stepper" aria-label="製作流水線進度">
+          <button class="step-item" data-stage="1">
+            <span class="step-dot dot dot-action"></span>
+            <div class="step-meta">
+              <span class="step-num">階段 ①</span>
+              <span class="step-name">寫一句話</span>
+              <span class="step-state-text">等你輸入</span>
+            </div>
+          </button>
+          <div class="step-connector"></div>
+          <button class="step-item" data-stage="2">
+            <span class="step-dot dot dot-pending"></span>
+            <div class="step-meta">
+              <span class="step-num">階段 ②</span>
+              <span class="step-name">自動拆解分鏡</span>
+              <span class="step-state-text">等待中</span>
+            </div>
+          </button>
+          <div class="step-connector"></div>
+          <button class="step-item" data-stage="3">
+            <span class="step-dot dot dot-pending"></span>
+            <div class="step-meta">
+              <span class="step-num">階段 ③</span>
+              <span class="step-name">收集鏡頭素材</span>
+              <span class="step-state-text">等待中</span>
+            </div>
+          </button>
+          <div class="step-connector"></div>
+          <button class="step-item" data-stage="4">
+            <span class="step-dot dot dot-pending"></span>
+            <div class="step-meta">
+              <span class="step-num">階段 ④</span>
+              <span class="step-name">全自動剪輯轉場</span>
+              <span class="step-state-text">等待中</span>
+            </div>
+          </button>
+          <div class="step-connector"></div>
+          <button class="step-item" data-stage="5">
+            <span class="step-dot dot dot-pending"></span>
+            <div class="step-meta">
+              <span class="step-num">階段 ⑤</span>
+              <span class="step-name">成品交付</span>
+              <span class="step-state-text">等待中</span>
+            </div>
+          </button>
+        </nav>
+      </header>
+
+      <!-- 下方工作內容 ＋ 右側即時中文工作紀錄 -->
+      <div class="workspace-grid">
+        <main class="stage-canvas" id="stageCanvas">
+          <!-- FFmpeg 未安裝時的警示橫幅 -->
+          <div id="ffmpegMissingAlert" class="alert-banner alert-error hidden">
+            <div>
+              <strong>⚠️ 尚未偵測到本機 FFmpeg 影音引擎</strong>
+              <p>請打開 Mac「終端機 (Terminal)」執行以下指令安裝後重新整理：<code>brew install ffmpeg</code></p>
+            </div>
+          </div>
+
+          <!-- ==================== 階段 ①：一句話建立專案 ==================== -->
+          <section id="viewStage1" class="stage-view">
+            <div class="card hero-card">
+              <div class="card-badge badge-orange">✨ 零額外 API 費 ‧ 支援 Colab G4 (MiniMax H3) 全自動生片 ＋ Flow 監聽備援</div>
+              <h3 class="section-title">① 用一句話描述你想拍的影片</h3>
+              <p class="section-desc">
+                寫下主題、氛圍或時長即可！系統將自動規劃分鏡與英文 Prompt，並可一鍵連線你的 <strong>Colab G4 96GB（MiniMax H3 ＋ RealESRGAN）</strong>全自動首尾幀接力生出 1080p 真實成片！
+              </p>
+
+              <textarea
+                id="briefInput"
+                class="brief-textarea"
+                rows="3"
+                placeholder="例如：我要做一條 1 分鐘、橫屏、訪問溫莎城堡的實拍紀錄片，無聲方便後期配音"
+              >我要做一條 1 分鐘、橫屏、訪問溫莎城堡的實拍紀錄片，無聲方便後期配音</textarea>
+
+              <div class="example-pills">
+                <span class="example-label">一鍵填入範例：</span>
+                <button type="button" class="pill-btn" data-brief="我要做一條 45 秒、橫屏、倫敦聖誕節前的攝政街實拍紀錄片，無聲方便後期配音" data-dur="45" data-ratio="16:9" data-style="35mm_doc">
+                  🎄 45 秒倫敦聖誕節前的攝政街（4 幕首尾幀接力）
+                </button>
+                <button type="button" class="pill-btn" data-brief="我要做一條 45 秒、橫屏、訪問溫莎城堡的實拍紀錄片，無聲方便後期配音" data-dur="45" data-ratio="16:9" data-style="35mm_doc">
+                  🏰 45 秒溫莎城堡實拍紀錄片
+                </button>
+                <button type="button" class="pill-btn" data-brief="1 分鐘京都秋日古寺巡禮，晨霧紅楓與枯山水光影，無聲方便後期配音" data-dur="60" data-ratio="16:9" data-style="35mm_doc">
+                  🍁 1 分鐘京都秋日古寺巡禮
+                </button>
+              </div>
+
+              <div class="settings-grid">
+                <div class="field-group">
+                  <label for="selDuration">目標時長（自動換算幕數／鏡數）</label>
+                  <select id="selDuration">
+                    <option value="30">30 秒（建議 4 鏡）</option>
+                    <option value="45">45 秒（推薦｜4 幕 MiniMax H3 黃金節奏：15s + 10s×3）</option>
+                    <option value="60" selected>60 秒（預設，建議 8 鏡）</option>
+                    <option value="90">90 秒（建議 12 鏡）</option>
+                  </select>
+                </div>
+
+                <div class="field-group">
+                  <label for="selAspectRatio">畫面比例</label>
+                  <select id="selAspectRatio">
+                    <option value="16:9" selected>16:9 橫屏（1920×1080 預設）</option>
+                    <option value="9:16">9:16 豎屏（1080×1920 Shorts/Reels）</option>
+                  </select>
+                </div>
+
+                <div class="field-group">
+                  <label for="selVisualStyle">視覺風格鎖定（Style Lock）</label>
+                  <select id="selVisualStyle">
+                    <option value="35mm_doc" selected>35mm 寫實旅遊紀錄片（預設）</option>
+                    <option value="aerial_epic">電影航拍大片（IMAX 壯闊感）</option>
+                    <option value="film_vlog">唯美膠片 Vlog（Kodak 暖調）</option>
+                  </select>
+                </div>
+
+                <div class="field-group">
+                  <label for="selAudioMode">聲音模式</label>
+                  <select id="selAudioMode">
+                    <option value="mute" selected>純畫面無聲，方便後期自己配音（預設）</option>
+                    <option value="keep">保留 AI 影片原始音訊</option>
+                  </select>
+                </div>
+
+                <div class="field-group field-span-2">
+                  <label for="selPlannerMode">分鏡大腦模式（全部 $0 免費）</label>
+                  <select id="selPlannerMode">
+                    <option value="paste" selected>③ 免 Key 智慧導演初稿 ＋ 網頁貼上解析模式（預設，0 設定開箱即用）</option>
+                    <option value="gemini">① 免費 Gemini 文字 API Key（自動連線 Google AI Studio 生成）</option>
+                    <option value="ollama">② 本機 Ollama 離線模型（100% 本機離線 0 Key）</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="hero-actions" style="gap: 12px; flex-wrap: wrap;">
+                <button id="btnStartPipeline" class="btn btn-secondary btn-lg">
+                  📋 先拆解分鏡再確認（標準流程）
+                </button>
+                <button id="btnStartFullAutoOneShot" class="btn btn-cta btn-lg">
+                  ⚡ 一句話終極全自動（自動開 Colab ➔ 生片 ➔ 合成 ➔ 自動關機）
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ==================== 階段 ②：AI 導演自動規劃分鏡 ==================== -->
+          <section id="viewStage2" class="stage-view hidden">
+            <!-- 執行中提示 -->
+            <div id="stage2RunningBanner" class="action-banner banner-running hidden">
+              <div class="spinner"></div>
+              <div>
+                <strong>🔵 AI 導演正在自動撰寫分鏡腳本與英文生片 Prompt...</strong>
+                <p>正在鎖定全片光影風格並拆解遊覽敘事動線，請稍候數秒。</p>
+              </div>
+            </div>
+
+            <!-- 失敗重試提示 -->
+            <div id="stage2FailedBanner" class="action-banner banner-failed hidden">
+              <div>
+                <strong>🔴 分鏡自動生成遇到問題</strong>
+                <p id="stage2ErrorText"></p>
+              </div>
+              <div class="banner-btns">
+                <button id="btnRetryStage2" class="btn btn-secondary">🔄 單步重試</button>
+                <button id="btnFallbackSmartDraft" class="btn btn-primary">⚡ 改用免 Key 智慧初稿</button>
+              </div>
+            </div>
+
+            <!-- 橘燈人工審核點 #1 -->
+            <div id="stage2ActionBanner" class="action-banner banner-action">
+              <div>
+                <div class="action-tag">🟠 等你動手｜人工審核點 #1（可選微調）</div>
+                <strong>請確認以下分鏡腳本與英文 Prompt</strong>
+                <p>你可以直接修改任何文字、拖曳卡片調順序、增刪鏡頭，或展開「免 Key 貼上解析器」貼入 Gemini 網頁版回覆。</p>
+              </div>
+              <div class="banner-btns">
+                <button id="btnTogglePastePanel" class="btn btn-secondary">
+                  📋 免 Key 貼上解析器
+                </button>
+                <button id="btnConfirmStoryboard" class="btn btn-cta">
+                  ✅ 確認分鏡，進入生片 ➔
+                </button>
+              </div>
+            </div>
+
+            <!-- 免 Key 貼上解析折疊面板 -->
+            <div id="pasteParserPanel" class="card paste-panel hidden">
+              <div class="paste-panel-header">
+                <div>
+                  <h4>📋 免 API Key｜搭配 Gemini / ChatGPT 網頁版貼上解析</h4>
+                  <p class="muted">第 1 步：複製總指令貼給 Gemini 網頁版 ➔ 第 2 步：把 Gemini 產出的 JSON 或分鏡文字貼回下方框框，自動轉成精美分鏡卡片！</p>
+                </div>
+                <button id="btnCopyMasterPrompt" class="btn btn-secondary">
+                  📑 一鍵複製「AI 導演總指令」
+                </button>
+              </div>
+              <textarea
+                id="pasteStoryboardInput"
+                class="code-textarea"
+                rows="6"
+                placeholder="在此貼上 Gemini / ChatGPT 產出的 JSON 或 Markdown 分鏡內容..."
+              ></textarea>
+              <div class="paste-panel-actions">
+                <button id="btnParsePasted" class="btn btn-primary">⚡ 解析並載入分鏡卡片</button>
+                <button id="btnRegenSmartDraft" class="btn btn-ghost">🔄 重新產生內建智慧初稿</button>
+              </div>
+            </div>
+
+            <!-- 統一視覺基因與負面提示詞 -->
+            <div class="card style-lock-card">
+              <div class="two-col">
+                <div class="field-group">
+                  <label>🎨 統一視覺基因（Style Lock）</label>
+                  <input id="inputStyleLock" type="text" placeholder="全片統一光影、鏡頭與色調設定..." />
+                </div>
+                <div class="field-group">
+                  <label class="label-with-btn">
+                    <span>🚫 統一負面提示詞（Negative Prompt）</span>
+                    <button id="btnCopyNegPrompt" class="btn-tiny" type="button">複製</button>
+                  </label>
+                  <input id="inputNegPrompt" type="text" placeholder="避免卡通、字幕、浮水印等..." />
+                </div>
+              </div>
+            </div>
+
+            <!-- 分鏡編輯清單 -->
+            <div class="shots-toolbar">
+              <span id="stage2ShotsSummary" class="shots-count-label">共 8 個分鏡</span>
+              <span class="muted">💡 提示：按住卡片左上角「⠿」可上下拖曳調整出場順序，修改文字會自動儲存</span>
+              <button id="btnAddShot" class="btn btn-secondary btn-sm">＋ 新增一鏡</button>
+            </div>
+
+            <div id="storyboardList" class="storyboard-list"></div>
+
+            <div class="stage-bottom-cta">
+              <button id="btnConfirmStoryboardBottom" class="btn btn-cta btn-lg">
+                ✅ 確認分鏡無誤，進入階段 ③ 收集鏡頭素材 ➔
+              </button>
+            </div>
+          </section>
+
+          <!-- ==================== 階段 ③：Colab CLI 零人工全自動生片 ＋ 備援 ==================== -->
+          <section id="viewStage3" class="stage-view hidden">
+            <!-- 終極零人工全自動主控台（官方 Colab CLI 自動搶卡 -> 部署 MiniMax H3 -> 首尾幀接力生片 -> 自動關機） -->
+            <div id="comfyuiHeroCard" class="comfy-hero-card">
+              <div class="comfy-hero-top">
+                <div>
+                  <div class="card-badge badge-blue">⚡ 終極模式（零人工干預）‧ 免開 Colab 網頁 ‧ 拍完自動關機省算力</div>
+                  <h3>Google Colab 全自動雲端拍片（自動搶卡 G4/A100/L4 ＋ MiniMax H3 首尾幀接力）</h3>
+                  <p class="muted">
+                    僅需首次完成一次 Google 授權；之後點下方按鈕即全自動「開機搶卡 ➔ 部署模型 ➔ 首尾幀接力生片 ➔ 拍完自動 <code>colab stop</code> 關機 ➔ 合成 1080p 成片」！
+                  </p>
+                </div>
+                <button id="btnOpenColabAuth" type="button" class="btn btn-secondary btn-sm">
+                  🔑 授權 Google Colab（首次一次）
+                </button>
+              </div>
+
+              <div class="comfy-url-row">
+                <select id="selColabGpuPriority" style="max-width: 340px;">
+                  <option value="G4,A100,L4" selected>顯卡自動搶卡順位：G4 96GB ➔ A100 ➔ L4（推薦）</option>
+                  <option value="L4">直接選 L4 24GB（最省計算單元、5 秒速連）</option>
+                  <option value="G4">僅搶 G4 96GB 旗艦卡</option>
+                  <option value="A100,L4">優先 A100 80GB ➔ 備援 L4</option>
+                </select>
+                <button id="btnStartColabZeroTouch" type="button" class="btn btn-cta">
+                  ⚡ 一鍵全自動（開機 ➔ 生片 ➔ 合成 ➔ 自動關機）
+                </button>
+                <button id="btnStopComfyAuto" type="button" class="btn btn-danger hidden">
+                  ⏹️ 中斷並立刻關閉雲端 GPU
+                </button>
+              </div>
+
+              <div class="comfy-options-row">
+                <label class="checkbox-inline">
+                  <input type="checkbox" id="chkComfyRelay" checked />
+                  <span>🔗 首尾幀接力（自動擷取上一幕尾幀無縫銜接下一幕）</span>
+                </label>
+                <label class="checkbox-inline">
+                  <input type="checkbox" id="chkColabAutoStop" checked />
+                  <span>🛑 拍完（或失敗）自動關機省計算單元</span>
+                </label>
+                <label class="checkbox-inline">
+                  <input type="checkbox" id="chkComfyEsrgan" checked />
+                  <span>✨ G4/A100 自動啟用 RealESRGAN 1080p</span>
+                </label>
+                <label class="checkbox-inline">
+                  <input type="checkbox" id="chkComfyTurbo" />
+                  <span>⚡ 8-Step Turbo 加速</span>
+                </label>
+              </div>
+
+              <div id="comfyStatusStrip" class="comfy-status-strip hidden"></div>
+
+              <!-- 進階折疊：手動貼上既有 Colab ComfyUI 網址 -->
+              <details class="manual-comfy-details">
+                <summary class="watcher-summary">🔌 進階選項：手動貼上已啟動的 Colab ComfyUI 網址（或下載 .ipynb 筆記本）</summary>
+                <div class="comfy-url-row mt-8">
+                  <input
+                    id="inputComfyUrl"
+                    type="text"
+                    placeholder="貼上既有的 https://xxxx-xxxx.trycloudflare.com"
+                  />
+                  <button id="btnTestComfyUrl" type="button" class="btn btn-secondary btn-sm">
+                    🔌 測試連線
+                  </button>
+                  <button id="btnStartComfyAuto" type="button" class="btn btn-primary btn-sm">
+                    🚀 用此網址生片
+                  </button>
+                  <a class="btn btn-ghost btn-sm" href="/api/colab/notebook" download>
+                    📥 下載 .ipynb
+                  </a>
+                </div>
+              </details>
+            </div>
+
+            <!-- 模式二備援：Downloads 自動監聽器控制台（可搭配 Google Flow 手動下載） -->
+            <details class="watcher-details">
+              <summary class="watcher-summary">📡 備援模式：Google Flow 網頁手動下載 ＋ Mac 下載資料夾自動監聽</summary>
+              <div id="watcherBanner" class="watcher-hero-card">
+                <div class="watcher-left">
+                  <div class="watcher-title-row">
+                    <span id="watcherPulse" class="radar-dot active"></span>
+                    <h3 id="watcherStatusTitle">📡 自動監聽 Mac 下載資料夾（開啟中）</h3>
+                  </div>
+                  <p id="watcherPathText" class="watcher-path">監聽位置：~/Downloads（僅抓取開啟監聽後新下載完成的影片，免改檔名、免手動上傳）</p>
+                  <div id="waitingShotCallout" class="waiting-callout">
+                    🟠 正在等待：<strong>Shot 01</strong> — 也可使用上方「Colab G4 一鍵全自動生片」免手動下載！
+                  </div>
+                </div>
+                <div class="watcher-right">
+                  <label class="switch-wrap">
+                    <input type="checkbox" id="chkWatcherToggle" checked />
+                    <span class="switch-slider"></span>
+                    <span id="watcherToggleLabel" class="switch-text">監聽開啟中</span>
+                  </label>
+                  <button id="btnImportLatestDownloads" class="btn btn-secondary btn-sm" title="若你剛才已經先下載好影片，可點此批次匯入最新檔案">
+                    📥 從 Downloads 匯入最新影片
+                  </button>
+                </div>
+              </div>
+            </details>
+
+            <!-- 收集進度條與合成控制列 -->
+            <div class="card asset-progress-bar-card">
+              <div class="asset-progress-top">
+                <div>
+                  <strong id="assetProgressText">素材收集進度：已完成 0 / 8 鏡</strong>
+                  <span id="assetEstDuration" class="muted ml-8"></span>
+                </div>
+                <div class="asset-actions-right">
+                  <label class="checkbox-inline">
+                    <input type="checkbox" id="chkAutoRender" checked />
+                    <span>收齊全部鏡頭後自動開始剪輯合成</span>
+                  </label>
+                  <button id="btnBackToStage2" class="btn btn-ghost btn-sm">⬅ 修改分鏡</button>
+                  <button id="btnTriggerRenderNow" class="btn btn-cta btn-sm" disabled>
+                    🎬 立即用現有鏡頭合成
+                  </button>
+                </div>
+              </div>
+              <div class="progress-track">
+                <div id="assetProgressFill" class="progress-fill fill-green" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <!-- 8 張分鏡素材收集看板 -->
+            <div id="assetKanbanGrid" class="asset-kanban-grid"></div>
+          </section>
+
+          <!-- ==================== 階段 ④：全自動後期剪輯流水線 ==================== -->
+          <section id="viewStage4" class="stage-view hidden">
+            <div class="card render-center-card">
+              <div id="renderRunningHeader" class="render-header">
+                <div class="spinner spinner-lg"></div>
+                <div>
+                  <span class="card-badge badge-blue">🔵 全自動背景渲染中（FFmpeg 兩階段標準化引擎）</span>
+                  <h3 id="renderSubstepTitle">正在標準化鏡頭與合成電影轉場...</h3>
+                  <p id="renderDetailText" class="muted">系統正在將所有片段統一為標準解析度、24fps、yuv420p 並串接 xfade 柔和疊化轉場。</p>
+                </div>
+              </div>
+
+              <div id="renderFailedBox" class="action-banner banner-failed hidden">
+                <div>
+                  <strong>🔴 後期剪輯合成失敗（已完成收集的鏡頭素材均安全保留）</strong>
+                  <p id="renderErrorText"></p>
+                </div>
+                <div class="banner-btns">
+                  <button id="btnBackToStage3FromFail" class="btn btn-secondary">⬅ 檢查鏡頭素材</button>
+                  <button id="btnRetryRender" class="btn btn-cta">🔄 單步重試合成</button>
+                </div>
+              </div>
+
+              <div class="big-progress-wrap">
+                <div class="big-progress-labels">
+                  <span id="renderStepBadge">處理進度</span>
+                  <strong id="renderPercentText">0%</strong>
+                </div>
+                <div class="progress-track progress-track-lg">
+                  <div id="renderProgressFill" class="progress-fill fill-blue-anim" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <div class="render-substeps-grid" id="renderSubstepsGrid">
+                <div class="substep-card" data-sub="1">
+                  <span class="sub-idx">1</span>
+                  <div>
+                    <strong>片段健檢（ffprobe）</strong>
+                    <p>檢查每支影片解析度與真實時長無損毀</p>
+                  </div>
+                </div>
+                <div class="substep-card" data-sub="2">
+                  <span class="sub-idx">2</span>
+                  <div>
+                    <strong>逐鏡標準化轉碼</strong>
+                    <p>統一尺寸、24fps、yuv420p 與靜音處理</p>
+                  </div>
+                </div>
+                <div class="substep-card" data-sub="3">
+                  <span class="sub-idx">3</span>
+                  <div>
+                    <strong>電影級轉場合成</strong>
+                    <p>串接 xfade 柔和疊化＋片頭淡入片尾淡出</p>
+                  </div>
+                </div>
+                <div class="substep-card" data-sub="4">
+                  <span class="sub-idx">4</span>
+                  <div>
+                    <strong>H.264 封裝與清理</strong>
+                    <p>CRF 18 高畫質輸出至桌面並清除暫存檔</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ==================== 階段 ⑤：成品交付與專案總覽 ==================== -->
+          <section id="viewStage5" class="stage-view hidden">
+            <div class="action-banner banner-done">
+              <div>
+                <div class="action-tag tag-green">🟢 階段 ⑤ 成品交付完成</div>
+                <strong>🎉 你的 AI 紀錄片成片已全自動剪輯完成！</strong>
+                <p id="deliveryPathLabel" class="muted">已同步輸出至專案資料夾與桌面 AutoVideoOutputs</p>
+              </div>
+              <div class="banner-btns">
+                <button id="btnRevealFinder" class="btn btn-cta">
+                  📂 在 Finder 中打開成品
+                </button>
+                <a id="btnDownloadVideo" class="btn btn-secondary" href="#" download>
+                  ⬇️ 下載 MP4 成片
+                </a>
+              </div>
+            </div>
+
+            <div class="delivery-layout">
+              <div class="card player-card">
+                <div class="video-frame">
+                  <video id="finalVideoPlayer" controls playsinline preload="metadata"></video>
+                </div>
+                <div class="specs-strip" id="outputSpecsStrip">
+                  <div class="spec-box">
+                    <span class="spec-label">最終時長</span>
+                    <strong id="specDuration">--</strong>
+                  </div>
+                  <div class="spec-box">
+                    <span class="spec-label">解析度</span>
+                    <strong id="specResolution">--</strong>
+                  </div>
+                  <div class="spec-box">
+                    <span class="spec-label">幀率</span>
+                    <strong id="specFps">--</strong>
+                  </div>
+                  <div class="spec-box">
+                    <span class="spec-label">檔案大小</span>
+                    <strong id="specSize">--</strong>
+                  </div>
+                  <div class="spec-box">
+                    <span class="spec-label">音軌狀態</span>
+                    <strong id="specAudio">--</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="delivery-side-cards">
+                <!-- 配音參考稿匯出 -->
+                <div class="card">
+                  <h4>🎙️ 後期配音時間軸參考稿</h4>
+                  <p class="muted">已自動扣除轉場重疊秒數，精準列出每鏡時間碼與中文旁白參考詞，可直接對照錄音！</p>
+                  <div class="btn-row mt-12">
+                    <a id="btnExportMd" class="btn btn-secondary btn-sm" href="#" target="_blank">
+                      📝 匯出 Markdown (.md)
+                    </a>
+                    <a id="btnExportTxt" class="btn btn-ghost btn-sm" href="#" target="_blank">
+                      📄 匯出純文字 (.txt)
+                    </a>
+                  </div>
+                </div>
+
+                <!-- 免重抓素材快速重新合成 -->
+                <div class="card">
+                  <h4>⚙️ 調整轉場／比例快速重新合成</h4>
+                  <p class="muted">不需重新收集素材！例如可一鍵再輸出一支 9:16 豎屏 Shorts 版或調整轉場秒數。</p>
+
+                  <div class="rerender-form">
+                    <div class="field-group">
+                      <label for="reAspectRatio">輸出比例</label>
+                      <select id="reAspectRatio">
+                        <option value="16:9">16:9 橫屏（1920×1080）</option>
+                        <option value="9:16">9:16 豎屏（1080×1920）</option>
+                      </select>
+                    </div>
+                    <div class="two-col">
+                      <div class="field-group">
+                        <label for="reTransition">疊化轉場（秒）</label>
+                        <input id="reTransition" type="number" min="0" max="1.5" step="0.1" value="0.5" />
+                      </div>
+                      <div class="field-group">
+                        <label for="reFps">幀率（FPS）</label>
+                        <select id="reFps">
+                          <option value="24">24 fps（電影感）</option>
+                          <option value="30">30 fps（流暢）</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="field-group">
+                      <label for="reAudioMode">聲音設定</label>
+                      <select id="reAudioMode">
+                        <option value="mute">純畫面無聲（移除原音軌）</option>
+                        <option value="keep">保留原始音訊</option>
+                      </select>
+                    </div>
+                    <label class="checkbox-inline mt-8">
+                      <input type="checkbox" id="reAlignDuration" />
+                      <span>微調速度自動對齊目標時長（安全 0.75x～1.25x）</span>
+                    </label>
+
+                    <button id="btnReRender" class="btn btn-primary btn-block mt-12">
+                      🚀 套用新參數重新合成
+                    </button>
+                    <button id="btnBackToAssets" class="btn btn-ghost btn-block mt-8">
+                      🎞️ 返回階段 ③ 替換個別鏡頭素材
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <!-- 右側常駐：即時工作紀錄 (Live Timeline Log) -->
+        <aside class="log-panel">
+          <div class="log-header">
+            <div class="log-title-wrap">
+              <span class="live-indicator"></span>
+              <h3>即時工作紀錄</h3>
+            </div>
+            <span id="sseConnBadge" class="sse-badge">即時連線就緒</span>
+          </div>
+          <div id="timelineLogList" class="log-list">
+            <div class="log-empty">系統待命中。建立或選擇專案後，這裡會用白話繁體中文即時播報每一步進度！</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- 單鏡預覽 Modal -->
+  <div id="clipPreviewModal" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="previewModalTitle">鏡頭預覽</h3>
+        <button id="btnClosePreviewModal" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body">
+        <video id="clipPreviewVideo" controls playsinline class="preview-video-el"></video>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Colab CLI 一次性網頁 OAuth 授權 Modal -->
+  <div id="colabAuthModal" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>🔑 首次綁定 Google Colab Pro（只需授權這一次！）</h3>
+        <button id="btnCloseColabAuthModal" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body settings-modal-body">
+        <div class="setting-callout">
+          🔒 憑證將透過 Google 官方 <code>google-colab-cli</code> 安全儲存在你本機的 <strong>macOS 鑰匙圈（Keychain）</strong>，之後拍片完全免開 Colab 網頁，自動開機搶卡、拍完自動關機省計算單元！
+        </div>
+
+        <div id="colabAuthModalStatus" class="comfy-status-strip">
+          檢查授權狀態中...
+        </div>
+
+        <div class="field-group">
+          <label>第 1 步：點按鈕打開 Google 官方授權頁面並點「允許（Allow）」</label>
+          <button id="btnLaunchColabOAuth" type="button" class="btn btn-primary">
+            🌐 開啟 Google 官方授權頁面
+          </button>
+          <input id="inputColabAuthUrl" type="text" readonly class="hidden mt-8" placeholder="授權網址..." />
+        </div>
+
+        <div class="field-group">
+          <label for="inputColabAuthCode">第 2 步：把 Google 頁面顯示的授權碼複製貼到這裡</label>
+          <input id="inputColabAuthCode" type="text" placeholder="貼上 4/0A... 開頭的授權碼" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelColabAuth" class="btn btn-ghost">稍後再說</button>
+        <button id="btnCompleteColabAuth" class="btn btn-cta">✅ 完成永久授權</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 系統設定 Modal（API Key 完全選填 + 預留未來影片 API 插槽） -->
+  <div id="settingsModal" class="modal-backdrop hidden">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <h3>⚙️ 系統與 AI 大腦設定（全部選填，不填也能完整使用）</h3>
+        <button id="btnCloseSettingsModal" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body settings-modal-body">
+        <div class="setting-callout">
+          💡 <strong>免付費承諾</strong>：本工具預設使用「免 Key 智慧初稿＋貼上解析」與「Google Flow 網頁下載自動監聽」，<strong>完全不需綁信用卡或填寫任何 API Key</strong> 即可從一句話做到成片！
+        </div>
+
+        <div class="two-col">
+          <div class="field-group">
+            <label for="cfgGeminiKey">免費 Gemini 文字 API Key（選填，加速階段 ②）</label>
+            <input id="cfgGeminiKey" type="password" placeholder="AIzaSy...（可於 Google AI Studio 免費申請）" />
+          </div>
+          <div class="field-group">
+            <label for="cfgGeminiModel">Gemini 模型名稱</label>
+            <input id="cfgGeminiModel" type="text" value="gemini-2.5-flash" />
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="field-group">
+            <label for="cfgOllamaUrl">本機 Ollama 服務位址（選填，離線模式用）</label>
+            <input id="cfgOllamaUrl" type="text" value="http://127.0.0.1:11434" />
+          </div>
+          <div class="field-group">
+            <label for="cfgOllamaModel">Ollama 模型名稱</label>
+            <input id="cfgOllamaModel" type="text" value="qwen2.5:7b" />
+          </div>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="two-col">
+          <div class="field-group">
+            <label for="cfgDownloadsDir">監聽下載資料夾路徑（留空預設 ~/Downloads）</label>
+            <input id="cfgDownloadsDir" type="text" placeholder="留空自動使用 Mac ~/Downloads" />
+          </div>
+          <div class="field-group">
+            <label for="cfgDesktopOutDir">成片額外輸出資料夾（留空預設 ~/Desktop/AutoVideoOutputs）</label>
+            <input id="cfgDesktopOutDir" type="text" placeholder="留空自動使用 ~/Desktop/AutoVideoOutputs" />
+          </div>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="two-col">
+          <div class="field-group">
+            <label for="cfgVideoProvider">階段 ③ 預設生片引擎</label>
+            <select id="cfgVideoProvider">
+              <option value="comfyui_colab">Colab G4 ComfyUI（MiniMax H3 + RealESRGAN 全自動，$0 API 費）</option>
+              <option value="flow_manual">Google Flow 網頁版半自動下載監聽（備援）</option>
+              <option value="veo_api">Google Veo 付費 API 全自動插槽（預留擴充）</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="cfgComfyUrl">Colab ComfyUI 連線網址（https://xxxx.trycloudflare.com）</label>
+            <input id="cfgComfyUrl" type="text" placeholder="貼上 Colab Cell 4 印出的 trycloudflare 網址" />
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="cfgVideoApiKey">未來商業影片 API Key 插槽（選填預留）</label>
+          <input id="cfgVideoApiKey" type="password" placeholder="使用 Colab G4 或 Flow 模式皆無須填寫" />
+        </div>
+
+        <div class="ffmpeg-diag-box" id="settingsFfmpegInfo"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelSettings" class="btn btn-ghost">取消</button>
+        <button id="btnSaveSettings" class="btn btn-primary">💾 儲存設定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右下角輕量 Toast 通知 -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

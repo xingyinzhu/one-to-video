@@ -1,0 +1,12 @@
+.git/
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+outputs/
+downloads/
+colab-config/
+.DS_Store
+*.log

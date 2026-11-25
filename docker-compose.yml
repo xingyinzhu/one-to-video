@@ -1,0 +1,21 @@
+services:
+  one-to-video:
+    image: xingyinzhu/one-to-video:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: one-to-video
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - STUDIO_HOST=0.0.0.0
+      - STUDIO_PORT=8787
+      - STUDIO_DATA_DIR=/app/data
+      - STUDIO_DOWNLOADS_DIR=/downloads
+      - STUDIO_DESKTOP_OUTPUT_DIR=/outputs
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/outputs
+      - ./downloads:/downloads
+      - ./colab-config:/root/.config/colab-cli
