@@ -122,6 +122,8 @@ class Database:
                     status TEXT NOT NULL DEFAULT 'pending',
                     clip_path TEXT NOT NULL DEFAULT '',
                     thumb_path TEXT NOT NULL DEFAULT '',
+                    ref_image_path TEXT NOT NULL DEFAULT '',
+                    camera_motion TEXT NOT NULL DEFAULT 'slow_push_in',
                     source_filename TEXT NOT NULL DEFAULT '',
                     actual_duration REAL NOT NULL DEFAULT 0.0,
                     width INTEGER NOT NULL DEFAULT 0,
@@ -154,6 +156,19 @@ class Database:
                 );
                 """
             )
+            # 平滑升級既有的 studio.db（零資料遺失）
+            existing_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(shots)").fetchall()
+            }
+            if "ref_image_path" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE shots ADD COLUMN ref_image_path TEXT NOT NULL DEFAULT ''"
+                )
+            if "camera_motion" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE shots ADD COLUMN camera_motion TEXT NOT NULL DEFAULT 'slow_push_in'"
+                )
 
     # -------------------------
     # 專案資料夾輔助
@@ -164,6 +179,7 @@ class Database:
             "root": root,
             "clips": root / "clips",
             "thumbs": root / "thumbs",
+            "refs": root / "refs",
             "temp": root / "temp",
             "output": root / "output",
         }
@@ -426,9 +442,9 @@ class Database:
                     INSERT INTO shots (
                         project_id, shot_order, title, duration_sec,
                         scene_desc_zh, voiceover_zh, prompt_en,
-                        status, clip_path, thumb_path, source_filename,
-                        actual_duration, width, height, has_audio, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        status, clip_path, thumb_path, ref_image_path, camera_motion,
+                        source_filename, actual_duration, width, height, has_audio, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         project_id,
@@ -441,6 +457,8 @@ class Database:
                         str(s.get("status", "pending")),
                         str(s.get("clip_path", "")),
                         str(s.get("thumb_path", "")),
+                        str(s.get("ref_image_path", "")),
+                        str(s.get("camera_motion", "slow_push_in") or "slow_push_in"),
                         str(s.get("source_filename", "")),
                         float(s.get("actual_duration", 0.0)),
                         int(s.get("width", 0)),
@@ -464,8 +482,9 @@ class Database:
                 """
                 INSERT INTO shots (
                     project_id, shot_order, title, duration_sec,
-                    scene_desc_zh, voiceover_zh, prompt_en, status, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    scene_desc_zh, voiceover_zh, prompt_en,
+                    ref_image_path, camera_motion, status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 """,
                 (
                     project_id,
@@ -475,6 +494,8 @@ class Database:
                     str(shot_data.get("scene_desc_zh", "")),
                     str(shot_data.get("voiceover_zh", "")),
                     str(shot_data.get("prompt_en", "")),
+                    str(shot_data.get("ref_image_path", "")),
+                    str(shot_data.get("camera_motion", "slow_push_in") or "slow_push_in"),
                     now,
                 ),
             )
@@ -493,6 +514,8 @@ class Database:
             "status",
             "clip_path",
             "thumb_path",
+            "ref_image_path",
+            "camera_motion",
             "source_filename",
             "actual_duration",
             "width",

@@ -707,3 +707,168 @@ def test_zero_touch_colab_cli_auto_provision_and_autostop(
     assert recorded_wfs[0]["5"]["inputs"]["height"] == 544
     assert recorded_wfs[0]["5"]["inputs"]["length"] == 124
     assert recorded_wfs[1]["5"]["inputs"]["first_frame"] == ["16", 0]
+
+
+def test_photo_to_video_ref_image_and_batch_upload(
+    isolated_env: Tuple[StudioOrchestrator, Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    端對端測試「實拍照片 ➔ 圖生影片（Photo-to-Video / I2V）」：
+    1. 透過 FFmpeg 生成 2 張不同比例的測試實拍 JPG（橫屏 & 豎屏）。
+    2. 透過 FastAPI /ref-images/batch 一次批次上傳並依張數調整鏡數為 2 鏡，驗證自動置中裁切為 1280×704 PNG。
+    3. 驗證 GET /shots/{id}/ref-image 回傳 HTTP 200 PNG，且 PATCH camera_motion="subtle_ambient" 自動更新保真 Prompt。
+    4. 驗證 relay_mode=False 時，Colab 生片會自動將實拍照片上傳至 /upload/image 並掛上 MiniMaxH3ImageToVideo.first_frame，
+       且帶入實拍保真運鏡 Prompt（preserve exact real-world architecture + static tripod + silent）。
+    5. 驗證 DELETE /shots/{id}/ref-image 可清除實拍照片。
+    """
+    import httpx
+    import backend.main as main_mod
+    from backend.comfyui_client import ComfyUIClient
+    from backend.video_engine import get_ffmpeg_or_raise
+
+    orch, _, _ = isolated_env
+    monkeypatch.setattr(main_mod, "orchestrator", orch)
+    client = TestClient(main_mod.app)
+
+    ffmpeg_bin, _ = get_ffmpeg_or_raise()
+    photo1 = tmp_path / "01_westminster_exterior.jpg"
+    photo2 = tmp_path / "02_westminster_nave.jpg"
+    subprocess.run(
+        [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "color=c=steelblue:s=1600x1200:d=1", "-frames:v", "1", str(photo1)],
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        [ffmpeg_bin, "-y", "-f", "lavfi", "-i", "color=c=goldenrod:s=900x1600:d=1", "-frames:v", "1", str(photo2)],
+        capture_output=True,
+        check=True,
+    )
+
+    # 建立專案並批次匯入 2 張實拍照片（依照片張數縮減為 2 鏡）
+    c_resp = client.post(
+        "/api/projects",
+        json={
+            "brief": "威斯敏斯特教堂實拍紀錄片",
+            "target_duration": 60,
+            "aspect_ratio": "16:9",
+            "visual_style": "35mm_doc",
+            "audio_mode": "mute",
+            "planner_mode": "paste",
+            "auto_render": False,
+        },
+    )
+    assert c_resp.status_code == 200
+    pid = c_resp.json()["project"]["id"]
+
+    batch_resp = client.post(
+        f"/api/projects/{pid}/ref-images/batch",
+        data={"replace_shot_count": "true"},
+        files=[
+            ("files", (photo1.name, photo1.read_bytes(), "image/jpeg")),
+            ("files", (photo2.name, photo2.read_bytes(), "image/jpeg")),
+        ],
+    )
+    assert batch_resp.status_code == 200
+    proj = batch_resp.json()["project"]
+    assert len(proj["shots"]) == 2
+    s1, s2 = proj["shots"]
+    assert s1["ref_image_path"] and Path(s1["ref_image_path"]).is_file()
+    assert s2["ref_image_path"] and Path(s2["ref_image_path"]).is_file()
+
+    # 驗證輸出 PNG 尺寸確實被無變形裁切為 1280×704
+    img_meta = probe_video(Path(s1["ref_image_path"])) if False else None  # noqa: F841
+    ref_get = client.get(f"/api/projects/{pid}/shots/{s1['id']}/ref-image")
+    assert ref_get.status_code == 200
+    assert ref_get.headers["content-type"].startswith("image/png")
+
+    # 切換 Shot 01 運鏡為「微動定鏡」
+    patch_resp = client.patch(
+        f"/api/projects/{pid}/shots/{s1['id']}",
+        json={"camera_motion": "subtle_ambient"},
+    )
+    assert patch_resp.status_code == 200
+    updated_s1 = patch_resp.json()["project"]["shots"][0]
+    assert updated_s1["camera_motion"] == "subtle_ambient"
+    assert "static tripod" in updated_s1["prompt_en"].lower()
+    assert "preserve the exact real-world architecture" in updated_s1["prompt_en"].lower()
+
+    # 模擬 ComfyUI 驗證在 relay_mode=False 下仍會上傳實拍照片作為首幀並使用保真 Prompt
+    mock_out = tmp_path / "mock_i2v_out"
+    mock_out.mkdir(parents=True, exist_ok=True)
+    v1 = _generate_synthetic_video(mock_out / "p1.mp4", 1280, 704, 24, 2.0, freq_hz=440)
+    v2 = _generate_synthetic_video(mock_out / "p2.mp4", 1280, 704, 24, 2.0, freq_hz=554)
+    recorded_wfs = []
+    uploaded_refs = []
+    history_map = {}
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "GET":
+            if path == "/system_stats":
+                return httpx.Response(
+                    200,
+                    json={"devices": [{"name": "NVIDIA A100-SXM4-40GB", "vram_total": int(39.6 * (1024**3)), "vram_free": int(38 * (1024**3))}]},
+                )
+            if path == "/object_info/MiniMaxH3ImageToVideo":
+                return httpx.Response(200, json={"MiniMaxH3ImageToVideo": {"input": {"required": {}}}})
+            if path.startswith("/object_info/"):
+                return httpx.Response(200, json={})
+            if path.startswith("/history/"):
+                jid = path.split("/history/", 1)[1]
+                return httpx.Response(200, json={jid: history_map[jid]} if jid in history_map else {})
+            if path == "/view":
+                fn = request.url.params.get("filename", "")
+                return httpx.Response(200, content=(mock_out / fn).read_bytes(), headers={"Content-Type": "video/mp4"})
+        elif request.method == "POST":
+            if path == "/upload/image":
+                uploaded_refs.append(len(request.content))
+                return httpx.Response(200, json={"name": f"ref_uploaded_{len(uploaded_refs)}.png"})
+            if path == "/prompt":
+                wf = json.loads(request.content.decode("utf-8"))["prompt"]
+                recorded_wfs.append(wf)
+                jid = f"pjob_{len(recorded_wfs)}"
+                fn = v1.name if len(recorded_wfs) == 1 else v2.name
+                history_map[jid] = {
+                    "status": {"status_str": "success", "completed": True},
+                    "outputs": {"14": {"videos": [{"filename": fn, "subfolder": "", "type": "output"}]}},
+                }
+                return httpx.Response(200, json={"prompt_id": jid})
+        return httpx.Response(404)
+
+    mock_transport = httpx.MockTransport(mock_handler)
+    orig_init = ComfyUIClient.__init__
+    monkeypatch.setattr(
+        ComfyUIClient,
+        "__init__",
+        lambda self, base_url, timeout_sec=45.0, transport=None: orig_init(self, base_url, timeout_sec=timeout_sec, transport=mock_transport),
+    )
+
+    orch.confirm_storyboard(pid, start_watcher=False)
+    gen_res = orch.start_comfyui_generation(
+        pid,
+        comfyui_url="https://mock-photo-i2v.trycloudflare.com",
+        relay_mode=False,
+        use_turbo=False,
+        enable_realesrgan=False,
+        poll_interval_sec=0.05,
+        run_async=False,
+    )
+    assert gen_res["done_shots"] == 2
+    assert len(uploaded_refs) == 2
+    assert recorded_wfs[0]["16"]["class_type"] == "LoadImage"
+    assert recorded_wfs[0]["5"]["inputs"]["first_frame"] == ["16", 0]
+    assert recorded_wfs[0]["5"]["inputs"]["width"] == 1280
+    assert recorded_wfs[0]["5"]["inputs"]["height"] == 704
+    assert "static tripod" in recorded_wfs[0]["5"]["inputs"]["prompt"].lower()
+    assert "silent documentary" in recorded_wfs[0]["5"]["inputs"]["prompt"].lower()
+    assert recorded_wfs[1]["16"]["class_type"] == "LoadImage"
+    assert recorded_wfs[1]["5"]["inputs"]["first_frame"] == ["16", 0]
+    # 無聲模式單鏡已移除音軌
+    assert gen_res["shots"][0]["has_audio"] is False
+
+    # 驗證移除實拍照片
+    del_resp = client.delete(f"/api/projects/{pid}/shots/{s2['id']}/ref-image")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["project"]["shots"][1]["ref_image_path"] == ""

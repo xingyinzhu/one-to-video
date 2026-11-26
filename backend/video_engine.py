@@ -112,6 +112,75 @@ def probe_video(file_path: Path) -> Dict[str, Any]:
     }
 
 
+def prepare_reference_image(
+    src_path: Path,
+    dest_png_path: Path,
+    aspect_ratio: str = "16:9",
+) -> Dict[str, Any]:
+    """
+    將使用者上傳的真實照片轉正（自動依 EXIF 方向）、無變形置中裁切為
+    MiniMax H3 黃金 32 倍數比例 PNG（16:9 -> 1280×704；9:16 -> 704×1280）。
+    macOS 本機額外支援 .heic / .heif 透過系統 sips 轉檔。
+    """
+    ffmpeg_bin, _ = get_ffmpeg_or_raise()
+    src = Path(src_path).resolve()
+    dest = Path(dest_png_path).resolve()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not src.is_file():
+        raise ValueError(f"找不到上傳的參考圖片：{src}")
+
+    target_w, target_h = (704, 1280) if aspect_ratio == "9:16" else (1280, 704)
+    work_src = src
+    tmp_heic_png: Optional[Path] = None
+
+    try:
+        if src.suffix.lower() in (".heic", ".heif") and shutil.which("sips"):
+            tmp_heic_png = dest.with_name(dest.stem + "_heic_tmp.png")
+            sips_proc = subprocess.run(
+                ["sips", "-s", "format", "png", str(src), "--out", str(tmp_heic_png)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            if sips_proc.returncode == 0 and tmp_heic_png.is_file():
+                work_src = tmp_heic_png
+
+        vf = (
+            f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+            f"crop={target_w}:{target_h},format=rgb24"
+        )
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            str(work_src),
+            "-frames:v",
+            "1",
+            "-vf",
+            vf,
+            str(dest),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
+        if proc.returncode != 0 or not dest.is_file() or dest.stat().st_size < 1024:
+            if src.suffix.lower() in (".heic", ".heif"):
+                raise ValueError(
+                    "目前容器環境無法直接解碼 iPhone .HEIC 照片，請先在 Mac 預覽程式或手機匯出為 JPG / PNG 後再上傳。"
+                )
+            err = (proc.stderr or "").strip()[-240:]
+            raise ValueError(f"無法處理此參考圖片（請確認為有效 JPG/PNG/WEBP 圖片）：{err}")
+
+        return {
+            "path": str(dest),
+            "width": target_w,
+            "height": target_h,
+            "file_size": dest.stat().st_size,
+        }
+    finally:
+        if tmp_heic_png and tmp_heic_png.exists():
+            tmp_heic_png.unlink(missing_ok=True)
+
+
 def extract_thumbnail(
     video_path: Path, thumb_path: Path, duration_hint: Optional[float] = None
 ) -> Path:

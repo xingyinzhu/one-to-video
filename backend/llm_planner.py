@@ -33,6 +33,63 @@ VISUAL_STYLE_CONFIG: Dict[str, Dict[str, str]] = {
 }
 
 
+CAMERA_MOTION_PRESETS: Dict[str, Dict[str, str]] = {
+    "slow_push_in": {
+        "label": "緩慢推鏡（推薦｜穩定器前進）",
+        "motion_en": "Smooth, very slow forward camera push-in gently moving deeper into the exact scene shown in the reference photograph",
+    },
+    "lateral_pan": {
+        "label": "平穩橫移（適合長廊／外觀立面）",
+        "motion_en": "Smooth, gentle lateral tracking dolly movement gliding steadily sideways across the exact scene shown in the reference photograph",
+    },
+    "tilt_up": {
+        "label": "緩慢仰拍（適合高塔／拱頂／花窗）",
+        "motion_en": "Slow, steady upward camera tilt gracefully revealing the vertical architectural height of the exact scene shown in the reference photograph",
+    },
+    "slow_pull_back": {
+        "label": "緩慢拉遠（適合全景／結尾收束）",
+        "motion_en": "Slow, smooth backward camera pull-out gently widening the perspective of the exact scene shown in the reference photograph",
+    },
+    "subtle_ambient": {
+        "label": "微動定鏡（保真度最高｜僅光影雲霧微動）",
+        "motion_en": "Virtually static tripod camera preserving the exact framing of the reference photograph with only subtle natural ambient motion such as soft shifting sunlight, drifting clouds, gentle foliage sway, or distant pedestrians",
+    },
+}
+
+
+def build_photo_i2v_prompt(
+    camera_motion: str = "slow_push_in",
+    aspect_ratio: str = "16:9",
+    visual_style: str = "35mm_doc",
+    audio_mode: str = "mute",
+    extra_hint_en: str = "",
+) -> str:
+    """
+    專為「真實拍攝照片 ➔ 圖生影片（I2V）」設計的保真運鏡 Prompt：
+    明確指示模型忠實保留原照片的建築幾何、材質與構圖，僅施加自然平順的鏡頭運鏡與光影微動，
+    大幅降低 AI 自由發揮導致的「假感」與建築變形。
+    """
+    preset = CAMERA_MOTION_PRESETS.get(camera_motion) or CAMERA_MOTION_PRESETS["slow_push_in"]
+    orientation = "16:9 landscape" if aspect_ratio == "16:9" else "9:16 vertical portrait"
+    style_hint = {
+        "35mm_doc": "authentic 35mm documentary cinematography, natural realistic lighting, subtle film grain",
+        "aerial_epic": "cinematic documentary camera stability, crisp natural daylight, realistic atmospheric depth",
+        "film_vlog": "warm Kodak film color fidelity, natural gentle camera motion, authentic travel footage",
+    }.get(visual_style, "authentic 35mm documentary cinematography, natural realistic lighting")
+
+    parts = [
+        f"Animate this real-world {orientation} photograph faithfully: {preset['motion_en']}",
+        "preserve the exact real-world architecture, proportions, perspective, surfaces, and fine details from the reference photo without altering or inventing structures",
+        style_hint,
+        "physically accurate lighting, steady natural motion, no morphing, no warping, no hallucinated objects, no text, no watermark",
+    ]
+    if extra_hint_en and extra_hint_en.strip():
+        parts.insert(1, extra_hint_en.strip().rstrip("."))
+    if audio_mode == "mute":
+        parts.append("silent documentary footage, no narration, no speech, no talking")
+    return ", ".join(parts) + "."
+
+
 def recommended_shot_count(target_duration: int) -> int:
     """根據目標時長換算建議分鏡/幕數（45 秒採 MiniMax H3 黃金 4 幕：15s + 10s×3）。"""
     if target_duration <= 48:

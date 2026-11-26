@@ -91,6 +91,19 @@ const DOT_CLASS = {
   failed: "dot-failed",
 };
 
+const CAMERA_MOTION_OPTIONS = [
+  { value: "slow_push_in", label: "🎥 緩慢推鏡（推薦｜穩定器前進）", short: "緩慢推鏡" },
+  { value: "lateral_pan", label: "🎥 平穩橫移（適合長廊／外觀立面）", short: "平穩橫移" },
+  { value: "tilt_up", label: "🎥 緩慢仰拍（適合高塔／拱頂／花窗）", short: "緩慢仰拍" },
+  { value: "slow_pull_back", label: "🎥 緩慢拉遠（適合全景／結尾）", short: "緩慢拉遠" },
+  { value: "subtle_ambient", label: "🎥 微動定鏡（保真度最高｜僅光影微動）", short: "微動定鏡" },
+];
+
+function getMotionShortLabel(val) {
+  const found = CAMERA_MOTION_OPTIONS.find((o) => o.value === val);
+  return found ? found.short : "緩慢推鏡";
+}
+
 // ==================== SSE 即時監控連線 ====================
 function connectProjectSSE(projectId) {
   disconnectSSE();
@@ -379,13 +392,23 @@ function renderStage2(proj) {
   }
 
   const listEl = $("storyboardList");
+  const pid = encodeURIComponent(proj.id);
   listEl.innerHTML = shots
-    .map(
-      (s) => `
-      <div class="shot-edit-card" draggable="true" data-shot-id="${s.id}">
+    .map((s) => {
+      const hasRef = Boolean(s.ref_image_path);
+      const refUrl = `/api/projects/${pid}/shots/${s.id}/ref-image?t=${encodeURIComponent(s.updated_at || "")}`;
+      const motionVal = s.camera_motion || "slow_push_in";
+      const motionOptsHtml = CAMERA_MOTION_OPTIONS.map(
+        (opt) =>
+          `<option value="${opt.value}" ${opt.value === motionVal ? "selected" : ""}>${opt.label}</option>`
+      ).join("");
+
+      return `
+      <div class="shot-edit-card ${hasRef ? "has-ref-photo" : ""}" draggable="true" data-shot-id="${s.id}">
         <div class="shot-card-head">
           <span class="drag-handle" title="按住拖曳調整順序">⠿</span>
           <span class="shot-badge">Shot ${String(s.shot_order).padStart(2, "0")}</span>
+          ${hasRef ? `<span class="ref-pill-tag">📸 實拍 I2V</span>` : ""}
           <input type="text" class="shot-title-input" data-field="title" value="${escapeHtml(s.title)}" placeholder="鏡頭標題" />
           <div class="shot-dur-wrap">
             <span>秒數</span>
@@ -393,6 +416,33 @@ function renderStage2(proj) {
           </div>
           <button type="button" class="btn-tiny" data-copy-prompt="${s.id}">複製 Prompt</button>
           <button type="button" class="btn-del-proj" data-del-shot="${s.id}" title="刪除此鏡">🗑️</button>
+        </div>
+
+        <div class="shot-ref-row" data-ref-drop="${s.id}">
+          <div class="shot-ref-thumb">
+            ${
+              hasRef
+                ? `<img src="${refUrl}" alt="實拍首幀" /><span class="ref-badge-mini">首幀</span>`
+                : `<span class="shot-ref-placeholder">📸 拖曳或上傳實拍照片<br><small>（可選，綁定後忠實保留原建築）</small></span>`
+            }
+          </div>
+          <div class="shot-ref-controls">
+            <div class="shot-ref-btns">
+              <label class="btn btn-secondary btn-sm" style="cursor:pointer;">
+                ${hasRef ? "🔄 更換實拍照片" : "📸 上傳實拍照片"}
+                <input type="file" accept="image/*,.heic,.heif" class="hidden" data-ref-file="${s.id}" />
+              </label>
+              ${
+                hasRef
+                  ? `<button type="button" class="btn btn-ghost btn-sm" data-ref-del="${s.id}">✖️ 移除照片</button>`
+                  : ""
+              }
+            </div>
+            <div class="shot-motion-select-wrap">
+              <label>實拍運鏡方式（綁定照片時自動套用保真運鏡）：</label>
+              <select data-field="camera_motion">${motionOptsHtml}</select>
+            </div>
+          </div>
         </div>
 
         <div class="shot-edit-grid">
@@ -405,16 +455,69 @@ function renderStage2(proj) {
             <textarea rows="2" data-field="voiceover_zh">${escapeHtml(s.voiceover_zh)}</textarea>
           </div>
           <div class="field-group shot-prompt-box">
-            <label>完整英文生片 Prompt（已附比例與寫實紀錄片前綴，可直接貼入 Google Flow）</label>
+            <label>完整英文生片 Prompt（綁定實拍照片時會自動切換為實拍保真運鏡 Prompt）</label>
             <textarea rows="2" class="code-textarea" data-field="prompt_en">${escapeHtml(s.prompt_en)}</textarea>
           </div>
         </div>
       </div>
-    `
-    )
+    `;
+    })
     .join("");
 
   bindStage2CardEvents(proj);
+}
+
+async function uploadShotRefImage(projectId, shotId, file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  showToast(`📸 正在轉正裁切實拍照片「${file.name}」...`);
+  try {
+    const res = await apiFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/shots/${shotId}/ref-image`,
+      { method: "POST", body: fd }
+    );
+    state.currentProject = res.project;
+    renderAll();
+    showToast(`📸 已成功綁定實拍照片「${file.name}」為本鏡首幀！`);
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function deleteShotRefImage(projectId, shotId) {
+  try {
+    const res = await apiFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/shots/${shotId}/ref-image`,
+      { method: "DELETE" }
+    );
+    state.currentProject = res.project;
+    renderAll();
+    showToast("已移除實拍照片");
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function batchUploadRefImages(projectId, fileList, replaceShotCount) {
+  const files = Array.from(fileList || []).sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+  );
+  if (!files.length) return;
+  const fd = new FormData();
+  files.forEach((f) => fd.append("files", f));
+  fd.append("replace_shot_count", replaceShotCount ? "true" : "false");
+  showToast(`📸 正在批次處理 ${files.length} 張實拍照片（自動轉正裁切）...`);
+  try {
+    const res = await apiFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/ref-images/batch`,
+      { method: "POST", body: fd }
+    );
+    state.currentProject = res.project;
+    renderAll();
+    showToast(`🎉 已成功批次綁定 ${files.length} 張實拍照片為各鏡首幀（I2V 保真運鏡）！`);
+  } catch (err) {
+    showToast(err.message, "error");
+  }
 }
 
 function bindStage2CardEvents(proj) {
@@ -434,12 +537,49 @@ function bindStage2CardEvents(proj) {
             { method: "PATCH", body: { [field]: val } }
           );
           state.currentProject = res.project;
+          if (field === "camera_motion") {
+            inp.blur();
+            renderStage2(state.currentProject);
+          }
           showToast(`已自動儲存 Shot 更新`);
         } catch (err) {
           showToast(err.message, "error");
         }
       });
     });
+
+    // 單鏡實拍照片上傳／移除／拖曳
+    const refFileInp = card.querySelector("[data-ref-file]");
+    if (refFileInp) {
+      refFileInp.addEventListener("change", async () => {
+        if (!refFileInp.files || !refFileInp.files[0]) return;
+        await uploadShotRefImage(proj.id, shotId, refFileInp.files[0]);
+        refFileInp.value = "";
+      });
+    }
+    const refDelBtn = card.querySelector("[data-ref-del]");
+    if (refDelBtn) {
+      refDelBtn.addEventListener("click", () => deleteShotRefImage(proj.id, shotId));
+    }
+    const refDrop = card.querySelector("[data-ref-drop]");
+    if (refDrop) {
+      refDrop.addEventListener("dragover", (e) => {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+          e.preventDefault();
+          e.stopPropagation();
+          refDrop.classList.add("drag-over");
+        }
+      });
+      refDrop.addEventListener("dragleave", () => refDrop.classList.remove("drag-over"));
+      refDrop.addEventListener("drop", async (e) => {
+        refDrop.classList.remove("drag-over");
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          await uploadShotRefImage(proj.id, shotId, e.dataTransfer.files[0]);
+        }
+      });
+    }
 
     // 拖曳排序
     card.addEventListener("dragstart", (e) => {
@@ -597,41 +737,61 @@ function renderStage3(proj) {
       }
 
       const thumbUrl = `/api/projects/${encodeURIComponent(proj.id)}/shots/${s.id}/thumb?t=${encodeURIComponent(s.updated_at || "")}`;
+      const hasRef = Boolean(s.ref_image_path);
+      const refUrl = `/api/projects/${encodeURIComponent(proj.id)}/shots/${s.id}/ref-image?t=${encodeURIComponent(s.updated_at || "")}`;
+      const motionShort = getMotionShortLabel(s.camera_motion || "slow_push_in");
 
       const mediaBoxHtml = isDone
         ? `
           <div class="asset-thumb-box" data-preview-shot="${s.id}">
             <img class="asset-thumb-img" src="${thumbUrl}" alt="Shot ${orderStr}" />
             <div class="play-overlay">▶️</div>
+            ${hasRef ? `<span class="ref-badge-overlay">📸 實拍 I2V</span>` : ""}
             <span class="clip-meta-overlay">${Number(s.actual_duration).toFixed(1)}s ｜ ${s.width}×${s.height}</span>
+          </div>
+        `
+        : hasRef
+        ? `
+          <div class="asset-thumb-box has-ref-preview" data-drop-shot="${s.id}">
+            <img class="asset-thumb-img" src="${refUrl}" alt="實拍首幀 Shot ${orderStr}" />
+            <span class="ref-badge-overlay">📸 實拍首幀｜${escapeHtml(motionShort)}</span>
+            <span class="clip-meta-overlay">待雲端保真運鏡生成</span>
           </div>
         `
         : `
           <div class="asset-thumb-box" data-drop-shot="${s.id}">
             <div style="font-size:1.45rem; margin-bottom:4px;">${isNext ? "📥" : "🎞️"}</div>
             <div style="font-size:0.8rem; color:#cbd5e1;">
-              ${isNext ? "去 Flow 點下載將自動歸入此鏡" : "等待依序歸檔"}
+              ${isNext ? "可點下方「📸 實拍圖」綁定照片，或直接雲端生成" : "等待生成或綁定實拍照片"}
             </div>
-            <div style="font-size:0.73rem; color:#64748b; margin-top:2px;">也可直接將 MP4/MOV 拖曳至此處替換</div>
+            <div style="font-size:0.73rem; color:#64748b; margin-top:2px;">拖曳圖片＝綁定實拍首幀｜拖曳 MP4＝匯入成品片段</div>
           </div>
         `;
 
       const buttonsHtml = isDone
         ? `
           <button type="button" class="btn btn-secondary btn-sm" data-preview-btn="${s.id}">▶️ 預覽</button>
-          <button type="button" class="btn btn-primary btn-sm" data-comfy-single="${s.id}" title="透過 Colab G4 MiniMax H3 單獨重新生成這幕">🤖 雲端重做</button>
+          <button type="button" class="btn btn-primary btn-sm" data-comfy-single="${s.id}" title="透過 Colab 單獨重新生成這幕">🤖 重做</button>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer;" title="綁定或更換這幕的實拍照片">
+            📸 實拍圖
+            <input type="file" accept="image/*,.heic,.heif" class="hidden" data-s3-ref-file="${s.id}" />
+          </label>
           <button type="button" class="btn btn-ghost btn-sm" data-retake-shot="${s.id}">🔄 重設</button>
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer;">
-            📂 替換
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer;" title="手動選擇本機影片檔">
+            📂
             <input type="file" accept=".mp4,.mov,.webm,.mkv" class="hidden" data-file-shot="${s.id}" />
           </label>
         `
         : `
-          <button type="button" class="btn ${isNext ? "btn-cta" : "btn-primary"} btn-sm" data-comfy-single="${s.id}" title="使用上方 Colab G4 網址自動生成這幕">
-            🤖 雲端生成這幕
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer;" title="上傳你的真實拍攝照片作為這幕首幀（保真運鏡）">
+            ${hasRef ? "🔄 換實拍圖" : "📸 實拍圖"}
+            <input type="file" accept="image/*,.heic,.heif" class="hidden" data-s3-ref-file="${s.id}" />
+          </label>
+          <button type="button" class="btn ${isNext ? "btn-cta" : "btn-primary"} btn-sm" data-comfy-single="${s.id}" title="使用上方 Colab 網址單獨生成這幕">
+            🤖 生成這幕
           </button>
-          <button type="button" class="btn btn-secondary btn-sm" data-copy-go-flow="${s.id}">
-            📋 去 Flow
+          <button type="button" class="btn btn-ghost btn-sm" data-copy-go-flow="${s.id}">
+            📋 Flow
           </button>
           <label class="btn btn-ghost btn-sm" style="flex:0 0 auto; cursor:pointer;" title="手動選擇本機影片檔">
             📂
@@ -768,6 +928,15 @@ function bindStage3CardEvents(proj) {
     });
   });
 
+  // 選取實拍照片上傳綁定
+  grid.querySelectorAll("[data-s3-ref-file]").forEach((inp) => {
+    inp.addEventListener("change", async () => {
+      if (!inp.files || !inp.files[0]) return;
+      await uploadShotRefImage(proj.id, Number(inp.dataset.s3RefFile), inp.files[0]);
+      inp.value = "";
+    });
+  });
+
   // 選取檔案上傳替換
   grid.querySelectorAll("[data-file-shot]").forEach((inp) => {
     inp.addEventListener("change", async () => {
@@ -777,7 +946,7 @@ function bindStage3CardEvents(proj) {
     });
   });
 
-  // 拖曳影片檔到卡片替換
+  // 拖曳檔案到卡片：圖片＝綁定實拍首幀，影片＝匯入片段
   grid.querySelectorAll(".asset-card").forEach((card) => {
     const sid = Number(card.dataset.cardShot);
     card.addEventListener("dragover", (e) => {
@@ -793,7 +962,16 @@ function bindStage3CardEvents(proj) {
       card.classList.remove("drag-over");
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         e.preventDefault();
-        await uploadClipToShot(proj.id, sid, e.dataTransfer.files[0]);
+        const dropped = e.dataTransfer.files[0];
+        const lower = (dropped.name || "").toLowerCase();
+        if (
+          (dropped.type && dropped.type.startsWith("image/")) ||
+          /\.(jpg|jpeg|png|webp|bmp|tif|tiff|heic|heif)$/.test(lower)
+        ) {
+          await uploadShotRefImage(proj.id, sid, dropped);
+        } else {
+          await uploadClipToShot(proj.id, sid, dropped);
+        }
       }
     });
   });
@@ -1221,6 +1399,22 @@ function initEvents() {
 
   $("btnCopyNegPrompt").addEventListener("click", () => {
     copyText($("inputNegPrompt").value, "已複製統一負面提示詞！");
+  });
+
+  // 階段 ② & ③：批次匯入多張實拍照片
+  $("inputBatchRefStage2").addEventListener("change", async () => {
+    const inp = $("inputBatchRefStage2");
+    if (!state.currentProject || !inp.files || !inp.files.length) return;
+    const replaceCnt = $("chkBatchReplaceCount") ? $("chkBatchReplaceCount").checked : true;
+    await batchUploadRefImages(state.currentProject.id, inp.files, replaceCnt);
+    inp.value = "";
+  });
+
+  $("inputBatchRefStage3").addEventListener("change", async () => {
+    const inp = $("inputBatchRefStage3");
+    if (!state.currentProject || !inp.files || !inp.files.length) return;
+    await batchUploadRefImages(state.currentProject.id, inp.files, false);
+    inp.value = "";
   });
 
   $("btnAddShot").addEventListener("click", async () => {

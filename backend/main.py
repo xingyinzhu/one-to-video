@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -118,6 +118,7 @@ class UpdateShotRequest(BaseModel):
     scene_desc_zh: Optional[str] = None
     voiceover_zh: Optional[str] = None
     prompt_en: Optional[str] = None
+    camera_motion: Optional[str] = None
 
 
 class ReorderShotsRequest(BaseModel):
@@ -347,6 +348,21 @@ async def api_update_shot(
     if not shot or shot["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="找不到此分鏡")
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    # 若已綁定實拍照片且使用者切換運鏡，同步更新保真運鏡 Prompt
+    if (
+        "camera_motion" in updates
+        and "prompt_en" not in updates
+        and shot.get("ref_image_path")
+    ):
+        proj_meta = orchestrator.db.get_project(project_id, include_details=False) or {}
+        from .llm_planner import build_photo_i2v_prompt
+
+        updates["prompt_en"] = build_photo_i2v_prompt(
+            camera_motion=updates["camera_motion"],
+            aspect_ratio=proj_meta.get("aspect_ratio", "16:9"),
+            visual_style=proj_meta.get("visual_style", "35mm_doc"),
+            audio_mode=proj_meta.get("audio_mode", "mute"),
+        )
     orchestrator.db.update_shot(shot_id, **updates)
     orchestrator.broadcast_state(project_id)
     return {
@@ -354,6 +370,101 @@ async def api_update_shot(
             orchestrator.db.get_project(project_id, include_details=True)
         )
     }
+
+
+ALLOWED_REF_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
+
+
+@app.post("/api/projects/{project_id}/shots/{shot_id}/ref-image")
+async def api_upload_shot_ref_image(
+    project_id: str, shot_id: int, file: UploadFile = File(...)
+) -> Dict[str, Any]:
+    orig_name = file.filename or "photo.jpg"
+    suffix = Path(orig_name).suffix.lower() or ".jpg"
+    if suffix not in ALLOWED_REF_IMAGE_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail="僅支援 JPG / PNG / WEBP / BMP / TIFF / HEIC 圖片格式",
+        )
+    tmp_fd, tmp_path_str = tempfile.mkstemp(suffix=suffix)
+    tmp_path = Path(tmp_path_str)
+    try:
+        with open(tmp_fd, "wb") as f_out:
+            while chunk := await file.read(1024 * 1024):
+                f_out.write(chunk)
+        proj = orchestrator.assign_shot_ref_image(
+            project_id=project_id,
+            shot_id=shot_id,
+            src_path=tmp_path,
+            original_filename=orig_name,
+        )
+        return {"project": proj}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
+
+@app.delete("/api/projects/{project_id}/shots/{shot_id}/ref-image")
+async def api_delete_shot_ref_image(project_id: str, shot_id: int) -> Dict[str, Any]:
+    try:
+        proj = orchestrator.clear_shot_ref_image(project_id, shot_id)
+        return {"project": proj}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/projects/{project_id}/shots/{shot_id}/ref-image")
+async def api_get_shot_ref_image(project_id: str, shot_id: int) -> FileResponse:
+    shot = orchestrator.db.get_shot(shot_id)
+    if not shot or shot["project_id"] != project_id or not shot.get("ref_image_path"):
+        raise HTTPException(status_code=404, detail="尚未綁定實拍參考照片")
+    p = resolve_project_media_path(shot["ref_image_path"], project_id, "refs")
+    if not p:
+        raise HTTPException(status_code=404, detail="實拍參考照片檔案不存在")
+    return FileResponse(str(p), media_type="image/png")
+
+
+@app.post("/api/projects/{project_id}/ref-images/batch")
+async def api_batch_upload_ref_images(
+    project_id: str,
+    files: List[UploadFile] = File(...),
+    replace_shot_count: bool = Form(True),
+) -> Dict[str, Any]:
+    if not files:
+        raise HTTPException(status_code=400, detail="請至少選擇一張實拍照片")
+    tmp_items: List[tuple[Path, str]] = []
+    try:
+        for f in files:
+            orig_name = f.filename or "photo.jpg"
+            suffix = Path(orig_name).suffix.lower() or ".jpg"
+            if suffix not in ALLOWED_REF_IMAGE_EXTS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"檔案「{orig_name}」格式不支援，請使用 JPG / PNG / WEBP 照片",
+                )
+            tmp_fd, tmp_path_str = tempfile.mkstemp(suffix=suffix)
+            tmp_path = Path(tmp_path_str)
+            with open(tmp_fd, "wb") as f_out:
+                while chunk := await f.read(1024 * 1024):
+                    f_out.write(chunk)
+            tmp_items.append((tmp_path, orig_name))
+
+        proj = orchestrator.batch_assign_ref_images(
+            project_id=project_id,
+            file_items=tmp_items,
+            replace_shot_count=replace_shot_count,
+        )
+        return {"project": proj}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        for tp, _ in tmp_items:
+            if tp.exists():
+                tp.unlink(missing_ok=True)
 
 
 @app.delete("/api/projects/{project_id}/shots/{shot_id}")

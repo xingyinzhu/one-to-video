@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI 紀錄片導演工作台｜一句話到成片</title>
-  <link rel="stylesheet" href="/static/style.css?v=1.0.1" />
+  <link rel="stylesheet" href="/static/style.css?v=1.0.4" />
 </head>
 <body>
   <div class="app-shell">
@@ -291,9 +291,21 @@
 
             <!-- 分鏡編輯清單 -->
             <div class="shots-toolbar">
-              <span id="stage2ShotsSummary" class="shots-count-label">共 8 個分鏡</span>
-              <span class="muted">💡 提示：按住卡片左上角「⠿」可上下拖曳調整出場順序，修改文字會自動儲存</span>
-              <button id="btnAddShot" class="btn btn-secondary btn-sm">＋ 新增一鏡</button>
+              <div class="shots-toolbar-left">
+                <span id="stage2ShotsSummary" class="shots-count-label">共 8 個分鏡</span>
+                <span class="muted">💡 拖曳左上「⠿」調順序；綁定真實拍攝照片即可啟用「實拍保真運鏡（I2V）」</span>
+              </div>
+              <div class="shots-toolbar-actions">
+                <label class="checkbox-inline" title="勾選後直接將分鏡數量對齊你上傳的照片張數">
+                  <input type="checkbox" id="chkBatchReplaceCount" checked />
+                  <span>依照片張數調整鏡數</span>
+                </label>
+                <label class="btn btn-cta btn-sm" style="cursor:pointer;" title="一次多選你的真實拍攝照片，自動轉正裁切並綁定為各鏡首幀">
+                  📸 批次匯入實拍照片
+                  <input type="file" id="inputBatchRefStage2" multiple accept="image/*,.heic,.heif" class="hidden" />
+                </label>
+                <button id="btnAddShot" class="btn btn-secondary btn-sm">＋ 新增一鏡</button>
+              </div>
             </div>
 
             <div id="storyboardList" class="storyboard-list"></div>
@@ -418,6 +430,10 @@
                   <label class="checkbox-inline">
                     <input type="checkbox" id="chkAutoRender" checked />
                     <span>收齊全部鏡頭後自動開始剪輯合成</span>
+                  </label>
+                  <label class="btn btn-primary btn-sm" style="cursor:pointer;" title="一次選取多張真實拍攝照片，依序綁定為各鏡首幀進行保真運鏡">
+                    📸 批次匯入實拍照片
+                    <input type="file" id="inputBatchRefStage3" multiple accept="image/*,.heic,.heif" class="hidden" />
                   </label>
                   <button id="btnBackToStage2" class="btn btn-ghost btn-sm">⬅ 修改分鏡</button>
                   <button id="btnTriggerRenderNow" class="btn btn-cta btn-sm" disabled>
@@ -760,6 +776,6 @@
   <!-- 右下角輕量 Toast 通知 -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="/static/app.js?v=1.0.3"></script>
+  <script src="/static/app.js?v=1.0.4"></script>
 </body>
 </html>

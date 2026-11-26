@@ -855,6 +855,149 @@ select:focus {
   border-color: var(--status-action);
 }
 
+.shot-edit-card.has-ref-photo {
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+.shots-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.shots-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ref-pill-tag {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+
+.shot-ref-row {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+  background: var(--bg-input);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.shot-ref-row.drag-over {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.shot-ref-thumb {
+  width: 168px;
+  height: 94px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0b0e14;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 6px;
+}
+
+.shot-ref-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shot-ref-placeholder {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.ref-badge-mini {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  background: rgba(16, 185, 129, 0.9);
+  color: #052e16;
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.shot-ref-controls {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shot-ref-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shot-motion-select-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shot-motion-select-wrap label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.shot-motion-select-wrap select {
+  flex: 1;
+  min-width: 220px;
+  max-width: 340px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+}
+
+.asset-thumb-box.has-ref-preview {
+  border-style: solid;
+  border-color: rgba(16, 185, 129, 0.55);
+  padding: 0;
+}
+
+.ref-badge-overlay {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(16, 185, 129, 0.92);
+  color: #052e16;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
 .shot-card-head {
   display: flex;
   align-items: center;

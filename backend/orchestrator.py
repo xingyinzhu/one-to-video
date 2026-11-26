@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from .colab_automation import (
     ColabCLIManager,
@@ -20,7 +20,9 @@ from .comfyui_client import ComfyUIClient, normalize_comfyui_url
 from .database import Database
 from .download_watcher import DownloadFolderWatcher, is_candidate_video_path
 from .llm_planner import (
+    CAMERA_MOTION_PRESETS,
     build_master_prompt_for_web,
+    build_photo_i2v_prompt,
     generate_smart_draft,
     generate_via_gemini,
     generate_via_ollama,
@@ -36,6 +38,7 @@ from .settings import (
 from .video_engine import (
     extract_last_frame,
     extract_thumbnail,
+    prepare_reference_image,
     probe_video,
     render_project_video,
 )
@@ -1008,6 +1011,215 @@ class StudioOrchestrator:
         return filename, "\n".join(lines)
 
     # -------------------------
+    # 實拍照片 ➔ 圖生影片（Photo-to-Video / I2V）管理
+    # -------------------------
+    def assign_shot_ref_image(
+        self,
+        project_id: str,
+        shot_id: int,
+        src_path: Path,
+        original_filename: str = "",
+    ) -> Dict[str, Any]:
+        """將使用者上傳的真實照片轉正裁切後綁定為指定分鏡的首幀參考圖。"""
+        proj = self.db.get_project(project_id, include_details=False)
+        shot = self.db.get_shot(shot_id)
+        if not proj or not shot or shot["project_id"] != project_id:
+            raise ValueError("找不到指定專案或分鏡。")
+
+        dirs = self.db.get_project_dirs(project_id)
+        dest_png = dirs["refs"] / f"shot_{int(shot['shot_order']):02d}_{shot_id}.png"
+        info = prepare_reference_image(
+            src_path=src_path,
+            dest_png_path=dest_png,
+            aspect_ratio=proj.get("aspect_ratio", "16:9"),
+        )
+        motion = shot.get("camera_motion") or "slow_push_in"
+        i2v_prompt = build_photo_i2v_prompt(
+            camera_motion=motion,
+            aspect_ratio=proj.get("aspect_ratio", "16:9"),
+            visual_style=proj.get("visual_style", "35mm_doc"),
+            audio_mode=proj.get("audio_mode", "mute"),
+        )
+        self.db.update_shot(
+            shot_id,
+            ref_image_path=str(dest_png),
+            prompt_en=i2v_prompt,
+        )
+        label = (CAMERA_MOTION_PRESETS.get(motion) or CAMERA_MOTION_PRESETS["slow_push_in"])["label"]
+        self.log_and_broadcast(
+            project_id,
+            f"📸 已為 Shot {int(shot['shot_order']):02d} 綁定實拍照片「{original_filename or src_path.name}」（{info['width']}×{info['height']}｜運鏡：{label}）。",
+            level="success",
+            stage=int(proj.get("current_stage") or 2),
+        )
+        return self.enrich_project(self.db.get_project(project_id, include_details=True))  # type: ignore[return-value]
+
+    def clear_shot_ref_image(self, project_id: str, shot_id: int) -> Dict[str, Any]:
+        """移除指定分鏡綁定的實拍參考照片（退回純文字生成）。"""
+        proj = self.db.get_project(project_id, include_details=False)
+        shot = self.db.get_shot(shot_id)
+        if not proj or not shot or shot["project_id"] != project_id:
+            raise ValueError("找不到指定專案或分鏡。")
+        old_ref = resolve_project_media_path(shot.get("ref_image_path") or "", project_id, "refs")
+        if old_ref and old_ref.exists():
+            old_ref.unlink(missing_ok=True)
+        self.db.update_shot(shot_id, ref_image_path="")
+        self.log_and_broadcast(
+            project_id,
+            f"已移除 Shot {int(shot['shot_order']):02d} 的實拍照片，將改回文字生片模式。",
+            level="info",
+            stage=int(proj.get("current_stage") or 2),
+        )
+        return self.enrich_project(self.db.get_project(project_id, include_details=True))  # type: ignore[return-value]
+
+    def batch_assign_ref_images(
+        self,
+        project_id: str,
+        file_items: List[Tuple[Path, str]],
+        replace_shot_count: bool = False,
+    ) -> Dict[str, Any]:
+        """一次批次匯入多張實拍照片，依序綁定為各鏡首幀（必要時自動增刪分鏡）。"""
+        if not file_items:
+            raise ValueError("未收到任何照片檔案。")
+        proj = self.db.get_project(project_id, include_details=True)
+        if not proj:
+            raise ValueError("找不到指定專案。")
+
+        shots = list(proj.get("shots") or [])
+        n_photos = len(file_items)
+        default_dur = round(max(4.0, min(10.0, float(proj.get("target_duration") or 60) / max(1, n_photos))), 1)
+
+        # 若張數多於現有分鏡，自動補建對應鏡頭
+        while len(shots) < n_photos:
+            idx = len(shots) + 1
+            created = self.db.add_shot(
+                project_id,
+                {
+                    "shot_order": idx,
+                    "title": f"實拍鏡頭 {idx:02d}",
+                    "duration_sec": default_dur,
+                    "scene_desc_zh": f"以第 {idx} 張實拍照片為基礎，緩慢平穩運鏡呈現真實細節。",
+                    "voiceover_zh": "",
+                    "prompt_en": build_photo_i2v_prompt(
+                        camera_motion="slow_push_in",
+                        aspect_ratio=proj.get("aspect_ratio", "16:9"),
+                        visual_style=proj.get("visual_style", "35mm_doc"),
+                        audio_mode=proj.get("audio_mode", "mute"),
+                    ),
+                    "camera_motion": "slow_push_in",
+                },
+            )
+            shots.append(created)
+
+        # 若勾選「依照片張數調整鏡數」，移除尾端多餘未完成分鏡
+        if replace_shot_count and len(shots) > n_photos:
+            for extra in reversed(shots[n_photos:]):
+                if extra.get("status") != "done":
+                    self.db.delete_shot(project_id, int(extra["id"]))
+            shots = self.db.list_shots(project_id)
+
+        dirs = self.db.get_project_dirs(project_id)
+        bound_count = 0
+        for idx, (tmp_p, orig_name) in enumerate(file_items):
+            shot = shots[idx]
+            sid = int(shot["id"])
+            order_num = int(shot["shot_order"])
+            dest_png = dirs["refs"] / f"shot_{order_num:02d}_{sid}.png"
+            prepare_reference_image(
+                src_path=tmp_p,
+                dest_png_path=dest_png,
+                aspect_ratio=proj.get("aspect_ratio", "16:9"),
+            )
+            motion = shot.get("camera_motion") or "slow_push_in"
+            i2v_prompt = build_photo_i2v_prompt(
+                camera_motion=motion,
+                aspect_ratio=proj.get("aspect_ratio", "16:9"),
+                visual_style=proj.get("visual_style", "35mm_doc"),
+                audio_mode=proj.get("audio_mode", "mute"),
+            )
+            updates: Dict[str, Any] = {
+                "ref_image_path": str(dest_png),
+                "prompt_en": i2v_prompt,
+            }
+            if shot.get("title", "").startswith("實拍鏡頭") and orig_name:
+                stem = Path(orig_name).stem[:24]
+                if stem:
+                    updates["title"] = f"實拍 {order_num:02d}｜{stem}"
+            self.db.update_shot(sid, **updates)
+            bound_count += 1
+
+        self.log_and_broadcast(
+            project_id,
+            f"📸 已批次匯入 {bound_count} 張實拍照片並自動轉正裁切為標準比例首幀，已切換為「實拍保真運鏡模式」！",
+            level="success",
+            stage=int(proj.get("current_stage") or 2),
+        )
+        return self.enrich_project(self.db.get_project(project_id, include_details=True))  # type: ignore[return-value]
+
+    def _resolve_shot_first_frame_and_prompt(
+        self,
+        client: ComfyUIClient,
+        project_id: str,
+        proj: Dict[str, Any],
+        shot: Dict[str, Any],
+        dirs: Dict[str, Path],
+        relay_mode: bool,
+        log_fn: Callable[[str, str], None],
+    ) -> Tuple[Optional[str], str, str]:
+        """
+        決定單幕的首幀參考圖、送給 MiniMax H3 的 Prompt 與顯示模式標籤：
+        1. 若該幕綁定了使用者實拍照片（ref_image_path）-> 最高優先，上傳照片並套用保真運鏡 Prompt！
+        2. 否則若開啟首尾幀接力（relay_mode）且前一幕已完成 -> 擷取前一幕尾幀上傳接力。
+        3. 否則 -> 純文字多機位獨立生成（T2V）。
+        """
+        shot_order = int(shot["shot_order"])
+        ref_local = resolve_project_media_path(
+            shot.get("ref_image_path") or "", project_id, "refs"
+        )
+        if ref_local:
+            remote_fname = f"{project_id}_ref_shot_{shot_order:02d}.png"
+            first_frame_remote = client.upload_image(ref_local, remote_name=remote_fname)
+            motion = shot.get("camera_motion") or "slow_push_in"
+            motion_label = (
+                CAMERA_MOTION_PRESETS.get(motion) or CAMERA_MOTION_PRESETS["slow_push_in"]
+            )["label"].split("（")[0]
+            prompt_str = build_photo_i2v_prompt(
+                camera_motion=motion,
+                aspect_ratio=proj.get("aspect_ratio", "16:9"),
+                visual_style=proj.get("visual_style", "35mm_doc"),
+                audio_mode=proj.get("audio_mode", "mute"),
+            )
+            log_fn(
+                f"📸 已上傳實拍照片作為 Shot {shot_order:02d} 首幀（運鏡：{motion_label}），忠實保留原建築結構進行保真運鏡！",
+                "info",
+            )
+            return first_frame_remote, prompt_str, f"實拍照片 I2V｜{motion_label}"
+
+        if relay_mode and shot_order > 1:
+            latest_shots = self.db.list_shots(project_id)
+            prev_shot = next(
+                (s for s in latest_shots if int(s["shot_order"]) == shot_order - 1 and s["status"] == "done"),
+                None,
+            )
+            prev_clip = (
+                resolve_project_media_path(prev_shot.get("clip_path") or "", project_id, "clips")
+                if prev_shot
+                else None
+            )
+            if prev_clip:
+                last_frame_local = dirs["temp"] / f"relay_from_shot_{shot_order - 1:02d}.png"
+                extract_last_frame(prev_clip, last_frame_local)
+                remote_fname = f"{project_id}_relay_to_shot_{shot_order:02d}.png"
+                first_frame_remote = client.upload_image(last_frame_local, remote_name=remote_fname)
+                log_fn(
+                    f"🔗 已擷取 Shot {shot_order - 1:02d} 尾幀並上傳，接力生成 Shot {shot_order:02d}！",
+                    "info",
+                )
+                return first_frame_remote, self._effective_prompt(shot["prompt_en"], proj), "首尾幀接力"
+
+        return None, self._effective_prompt(shot["prompt_en"], proj), "獨立多機位 T2V"
+
+    # -------------------------
     # Colab G4 ComfyUI（MiniMax H3 首尾幀接力 + RealESRGAN 1080p）全自動生片引擎
     # -------------------------
     @staticmethod
@@ -1279,47 +1491,32 @@ class StudioOrchestrator:
                 shot_id = int(shot["id"])
                 dur_sec = float(shot.get("duration_sec") or 10.0)
 
-                # 檢查是否啟用『首尾幀接力』：取前一幕 (shot_order - 1) 的最後一幀上傳為 first_frame
-                first_frame_remote: Optional[str] = None
-                if relay_mode and shot_order > 1:
-                    latest_shots = self.db.list_shots(project_id)
-                    prev_shot = next(
-                        (s for s in latest_shots if int(s["shot_order"]) == shot_order - 1 and s["status"] == "done"),
-                        None,
-                    )
-                    prev_clip = (
-                        resolve_project_media_path(prev_shot.get("clip_path") or "", project_id, "clips")
-                        if prev_shot
-                        else None
-                    )
-                    if prev_clip:
-                        last_frame_local = dirs["temp"] / f"relay_from_shot_{shot_order - 1:02d}.png"
-                        extract_last_frame(prev_clip, last_frame_local)
-                        remote_fname = f"{project_id}_relay_to_shot_{shot_order:02d}.png"
-                        first_frame_remote = client.upload_image(last_frame_local, remote_name=remote_fname)
-                        self.log_and_broadcast(
-                            project_id,
-                            f"🔗 已擷取 Shot {shot_order - 1:02d} 尾幀並上傳至 Colab，準備首尾幀接力生成 Shot {shot_order:02d}！",
-                            level="info",
-                            stage=3,
-                        )
+                first_frame_remote, effective_prompt, mode_badge = self._resolve_shot_first_frame_and_prompt(
+                    client=client,
+                    project_id=project_id,
+                    proj=proj,
+                    shot=shot,
+                    dirs=dirs,
+                    relay_mode=relay_mode,
+                    log_fn=lambda m, lvl: self.log_and_broadcast(project_id, m, level=lvl, stage=3),
+                )
 
                 self._gen_status[project_id] = {
                     "current_shot_order": shot_order,
                     "current_shot_title": shot["title"],
                     "total_targets": len(target_shots),
                     "completed_targets": idx - 1,
-                    "message": f"正在生成第 {idx}/{len(target_shots)} 幕：Shot {shot_order:02d}（{dur_sec:.0f}秒）...",
+                    "message": f"正在生成第 {idx}/{len(target_shots)} 幕：Shot {shot_order:02d}（{dur_sec:.0f}秒｜{mode_badge}）...",
                 }
                 self.log_and_broadcast(
                     project_id,
-                    f"🚀 開始雲端生成 Shot {shot_order:02d}「{shot['title']}」（預計 {dur_sec:.0f} 秒｜{'首尾幀接力' if first_frame_remote else '首幕建立'}{'｜含 RealESRGAN 1080p' if can_esrgan else ''}）...",
+                    f"🚀 開始雲端生成 Shot {shot_order:02d}「{shot['title']}」（預計 {dur_sec:.0f} 秒｜{mode_badge}{'｜含 RealESRGAN 1080p' if can_esrgan else ''}）...",
                     level="info",
                     stage=3,
                 )
 
                 wf = client.build_minimax_h3_workflow(
-                    prompt_en=self._effective_prompt(shot["prompt_en"], proj),
+                    prompt_en=effective_prompt,
                     duration_sec=dur_sec,
                     aspect_ratio=proj["aspect_ratio"],
                     first_frame_image=first_frame_remote,
@@ -1652,39 +1849,30 @@ class StudioOrchestrator:
                 if is_low_vram and auto_adapt_l4 and dur_sec > 6.0:
                     dur_sec = 5.0
 
-                first_frame_remote: Optional[str] = None
-                if relay_mode and shot_order > 1:
-                    latest_shots = self.db.list_shots(project_id)
-                    prev_shot = next(
-                        (s for s in latest_shots if int(s["shot_order"]) == shot_order - 1 and s["status"] == "done"),
-                        None,
-                    )
-                    prev_clip = (
-                        resolve_project_media_path(prev_shot.get("clip_path") or "", project_id, "clips")
-                        if prev_shot
-                        else None
-                    )
-                    if prev_clip:
-                        last_frame_local = dirs["temp"] / f"relay_from_shot_{shot_order - 1:02d}.png"
-                        extract_last_frame(prev_clip, last_frame_local)
-                        remote_fname = f"{project_id}_relay_to_shot_{shot_order:02d}.png"
-                        first_frame_remote = client.upload_image(last_frame_local, remote_name=remote_fname)
-                        _log(f"🔗 已擷取 Shot {shot_order - 1:02d} 尾幀並上傳，接力生成 Shot {shot_order:02d}！", "info")
+                first_frame_remote, effective_prompt, mode_badge = self._resolve_shot_first_frame_and_prompt(
+                    client=client,
+                    project_id=project_id,
+                    proj=proj,
+                    shot=shot,
+                    dirs=dirs,
+                    relay_mode=relay_mode,
+                    log_fn=_log,
+                )
 
                 self._gen_status[project_id] = {
                     "current_shot_order": shot_order,
                     "current_shot_title": shot["title"],
                     "total_targets": len(target_shots),
                     "completed_targets": idx - 1,
-                    "message": f"正在雲端生成第 {idx}/{len(target_shots)} 幕：Shot {shot_order:02d}（{dur_sec:.0f}秒）...",
+                    "message": f"正在雲端生成第 {idx}/{len(target_shots)} 幕：Shot {shot_order:02d}（{dur_sec:.0f}秒｜{mode_badge}）...",
                 }
                 _log(
-                    f"🚀 [{provisioned_gpu}] 開始生成 Shot {shot_order:02d}「{shot['title']}」（{dur_sec:.0f}秒｜{'首尾幀接力' if first_frame_remote else '首幕建立'}）...",
+                    f"🚀 [{provisioned_gpu}] 開始生成 Shot {shot_order:02d}「{shot['title']}」（{dur_sec:.0f}秒｜{mode_badge}）...",
                     "info",
                 )
 
                 wf = client.build_minimax_h3_workflow(
-                    prompt_en=self._effective_prompt(shot["prompt_en"], proj),
+                    prompt_en=effective_prompt,
                     duration_sec=dur_sec,
                     aspect_ratio=proj["aspect_ratio"],
                     first_frame_image=first_frame_remote,
